@@ -28,7 +28,7 @@ except ImportError:
 # ─────────────────────────────────────────────
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
-OPENROUTER_MODEL = "tencent/hy4-preview"
+OPENROUTER_MODEL = "inclusionai/ling-3.0-flash-fin:free"
 
 # Questions the AI Router is BANNED from answering.
 # These must only come from explicit CRM data.
