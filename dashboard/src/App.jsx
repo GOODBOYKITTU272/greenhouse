@@ -8,6 +8,7 @@ export default function App() {
   const [allJobs, setAllJobs] = useState([]);
   const [stats, setStats] = useState({ pending: 0, needsReview: 0, approved: 0, completed: 0, failed: 0, total: 0 });
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState("NEEDS_REVIEW");
   
   // Modal state
   const [selectedCandidate, setSelectedCandidate] = useState(null);
@@ -120,11 +121,11 @@ export default function App() {
 
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
-          <StatCard title="PENDING JOBS" value={stats.pending} color="text-gray-800" icon={<Clock className="w-5 h-5" />} />
-          <StatCard title="NEEDS REVIEW (AI DONE)" value={stats.needsReview} color="text-blue-500" icon={<AlertCircle className="w-5 h-5" />} />
+          <div onClick={() => setActiveTab("PENDING")} className="cursor-pointer"><StatCard title="PENDING JOBS" value={stats.pending} color="text-gray-800" icon={<Clock className="w-5 h-5" />} /></div>
+          <div onClick={() => setActiveTab("NEEDS_REVIEW")} className="cursor-pointer"><StatCard title="NEEDS REVIEW (AI DONE)" value={stats.needsReview} color="text-blue-500" icon={<AlertCircle className="w-5 h-5" />} /></div>
           <StatCard title="APPROVED (READY TO SUBMIT)" value={stats.approved} color="text-purple-500" icon={<CheckCircle className="w-5 h-5" />} />
           <StatCard title="COMPLETED" value={stats.completed} color="text-green-500" icon={<CheckCircle className="w-5 h-5" />} />
-          <StatCard title="FAILED / ERRORS" value={stats.failed} color="text-red-500" icon={<X className="w-5 h-5" />} />
+          <div onClick={() => setActiveTab("FAILED")} className="cursor-pointer"><StatCard title="FAILED / ERRORS" value={stats.failed} color="text-red-500" icon={<X className="w-5 h-5" />} /></div>
           <StatCard title="TOTAL IN QUEUE" value={stats.total} color="text-blue-500" icon={<Briefcase className="w-5 h-5" />} />
         </div>
 
