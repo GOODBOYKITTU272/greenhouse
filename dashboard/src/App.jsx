@@ -50,7 +50,12 @@ export default function App() {
   }
 
   const handleReviewDossier = (applywizzId, clientName) => {
-    const jobs = allJobs.filter(j => j.applywizz_id === applywizzId && j.status === 'NEEDS_REVIEW');
+    const jobs = allJobs.filter(j => {
+      if (j.applywizz_id !== applywizzId) return false;
+      if (activeTab === 'PENDING') return j.status === 'PENDING' || j.status === 'PENDING_NEW';
+      if (activeTab === 'FAILED') return j.status === 'FAILED' || j.status === 'ERROR';
+      return j.status === activeTab;
+    });
     setCandidateJobs(jobs);
     setSelectedCandidate({ applywizz_id: applywizzId, client_name: clientName });
     
