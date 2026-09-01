@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "ApplyWizz Auto-Filler",
+  "version": "1.0",
+  "description": "Internal Chrome Extension to instantly autofill Greenhouse applications.",
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "host_permissions": [
+    "*://*.greenhouse.io/*"
+  ]
+}

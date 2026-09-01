@@ -1,0 +1,220 @@
+import React, { useState, useEffect } from 'react';
+import { supabase } from './supabaseClient';
+import { Briefcase, CheckCircle, AlertCircle, Clock, X, DollarSign } from 'lucide-react';
+
+const targetClients = ['AWL-27321', 'AWL-32692', 'AWL-31835', 'AWL-28569', 'AWL-31072'];
+
+export default function App() {
+  const [allJobs, setAllJobs] = useState([]);
+  const [stats, setStats] = useState({ pending: 0, needsReview: 0, approved: 0, completed: 0, failed: 0, total: 0 });
+  const [loading, setLoading] = useState(true);
+  
+  // Modal state
+  const [selectedCandidate, setSelectedCandidate] = useState(null);
+  const [candidateJobs, setCandidateJobs] = useState([]);
+  const [uniqueQuestions, setUniqueQuestions] = useState({});
+
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  async function fetchData() {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('job_queue')
+        .select('*')
+        .in('applywizz_id', targetClients)
+        .order('created_at', { ascending: false });
+        
+      if (error) throw error;
+      
+      setAllJobs(data || []);
+      
+      const st = { pending: 0, needsReview: 0, approved: 0, completed: 0, failed: 0, total: data.length };
+      data.forEach(j => {
+        if (j.status === 'PENDING' || j.status === 'PENDING_NEW') st.pending++;
+        else if (j.status === 'NEEDS_REVIEW') st.needsReview++;
+        else if (j.status === 'APPROVED') st.approved++;
+        else if (j.status === 'SUBMITTED' || j.status === 'COMPLETED') st.completed++;
+        else if (j.status === 'FAILED' || j.status === 'ERROR') st.failed++;
+      });
+      setStats(st);
+    } catch (err) {
+      console.error("Error fetching data:", err);
+    }
+    setLoading(false);
+  }
+
+  const handleReviewDossier = (applywizzId, clientName) => {
+    const jobs = allJobs.filter(j => j.applywizz_id === applywizzId && j.status === 'NEEDS_REVIEW');
+    setCandidateJobs(jobs);
+    setSelectedCandidate({ applywizz_id: applywizzId, client_name: clientName });
+    
+    const uq = {};
+    jobs.forEach(job => {
+      if (job.application_data && job.application_data.answer_map) {
+        job.application_data.answer_map.forEach(q => {
+          const label = q.question_label || q.label;
+          if (!uq[label]) uq[label] = { ...q, displayAns: q.answer || '' };
+        });
+      }
+    });
+    setUniqueQuestions(uq);
+  };
+
+  const handleAnswerChange = (label, newAns) => {
+    setUniqueQuestions(prev => ({
+      ...prev,
+      [label]: { ...prev[label], displayAns: newAns }
+    }));
+  };
+
+  const approveAll = async () => {
+    if (!selectedCandidate) return;
+    try {
+      for (const job of candidateJobs) {
+        if (job.application_data && job.application_data.answer_map) {
+          job.application_data.answer_map.forEach(q => {
+            const label = q.question_label || q.label;
+            if (uniqueQuestions[label]) {
+              q.answer = uniqueQuestions[label].displayAns;
+            }
+          });
+        }
+        await supabase
+          .from('job_queue')
+          .update({ 
+            status: 'APPROVED',
+            application_data: job.application_data 
+          })
+          .eq('id', job.id);
+      }
+      setSelectedCandidate(null);
+      fetchData();
+    } catch (err) {
+      alert("Failed to approve jobs.");
+    }
+  };
+
+  // Group by candidate for the table
+  const candidateStats = {};
+  allJobs.filter(j => j.status === 'NEEDS_REVIEW').forEach(j => {
+    if (!candidateStats[j.applywizz_id]) {
+      candidateStats[j.applywizz_id] = { name: j.client_name, count: 0 };
+    }
+    candidateStats[j.applywizz_id].count++;
+  });
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-8">
+      <div className="max-w-7xl mx-auto">
+        <div className="flex justify-between items-center mb-8">
+          <h1 className="text-3xl font-bold text-gray-800">ApplyWizz Live Queue (React)</h1>
+          <button onClick={fetchData} className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg font-medium shadow-sm transition-colors">
+            {loading ? 'Refreshing...' : 'Refresh Data'}
+          </button>
+        </div>
+
+        {/* Stats Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
+          <StatCard title="PENDING JOBS" value={stats.pending} color="text-gray-800" icon={<Clock className="w-5 h-5" />} />
+          <StatCard title="NEEDS REVIEW (AI DONE)" value={stats.needsReview} color="text-blue-500" icon={<AlertCircle className="w-5 h-5" />} />
+          <StatCard title="APPROVED (READY TO SUBMIT)" value={stats.approved} color="text-purple-500" icon={<CheckCircle className="w-5 h-5" />} />
+          <StatCard title="COMPLETED" value={stats.completed} color="text-green-500" icon={<CheckCircle className="w-5 h-5" />} />
+          <StatCard title="FAILED / ERRORS" value={stats.failed} color="text-red-500" icon={<X className="w-5 h-5" />} />
+          <StatCard title="TOTAL IN QUEUE" value={stats.total} color="text-blue-500" icon={<Briefcase className="w-5 h-5" />} />
+        </div>
+
+        {/* Candidate Table */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <h2 className="text-xl font-bold text-gray-800 mb-6">Viewing: NEEDS_REVIEW</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b border-gray-100 text-xs uppercase tracking-wider text-gray-500">
+                  <th className="pb-4 font-semibold">Candidate</th>
+                  <th className="pb-4 font-semibold">ApplyWizz ID</th>
+                  <th className="pb-4 font-semibold">Jobs Pending Approval</th>
+                  <th className="pb-4 font-semibold">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {Object.entries(candidateStats).map(([id, info]) => (
+                  <tr key={id} className="hover:bg-gray-50 transition-colors">
+                    <td className="py-4 font-medium text-gray-800">{info.name || id}</td>
+                    <td className="py-4 text-gray-500">{id}</td>
+                    <td className="py-4 font-semibold text-blue-600">{info.count} Jobs</td>
+                    <td className="py-4">
+                      <button 
+                        onClick={() => handleReviewDossier(id, info.name)}
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                      >
+                        Review Dossier
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {Object.keys(candidateStats).length === 0 && (
+                  <tr><td colSpan="4" className="py-8 text-center text-gray-500">No jobs need review right now.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Modal */}
+        {selectedCandidate && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+              <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50 rounded-t-xl">
+                <div>
+                  <h3 className="text-xl font-bold text-gray-800">Candidate Dossier: {selectedCandidate.client_name || selectedCandidate.applywizz_id}</h3>
+                  <p className="text-sm font-semibold text-gray-800 mt-1">{candidateJobs.length} Jobs Pending Approval</p>
+                </div>
+                <button onClick={() => setSelectedCandidate(null)} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-medium">Close</button>
+              </div>
+              <div className="p-6 overflow-y-auto flex-1">
+                <h4 className="font-bold text-gray-800 mb-4 text-lg">All Application Answers to Review</h4>
+                <div className="space-y-4">
+                  {Object.entries(uniqueQuestions).map(([label, q], idx) => (
+                    <div key={idx} className="bg-white border border-gray-100 rounded-lg p-4 shadow-sm hover:border-blue-100 transition-colors">
+                      <p className="text-sm font-bold text-gray-700 mb-2">Q: {label}</p>
+                      <input 
+                        type="text" 
+                        value={q.displayAns}
+                        onChange={(e) => handleAnswerChange(label, e.target.value)}
+                        className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        placeholder="Type answer here..."
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="p-6 border-t border-gray-100 bg-gray-50 rounded-b-xl flex justify-end">
+                <button onClick={approveAll} className="bg-green-500 hover:bg-green-600 text-white px-8 py-3 rounded-xl font-bold text-lg shadow-sm flex items-center gap-2 transition-all transform hover:scale-105">
+                  <CheckCircle className="w-6 h-6" />
+                  Approve All {candidateJobs.length} Jobs
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StatCard({ title, value, color, icon }) {
+  return (
+    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center justify-center">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-gray-400">{icon}</span>
+        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">{title}</h3>
+      </div>
+      <p className={`text-5xl font-black ${color}`}>{value}</p>
+    </div>
+  );
+}

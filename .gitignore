@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+*.log
+.DS_Store
+*.csv
+.gemini/
+dashboard/node_modules/

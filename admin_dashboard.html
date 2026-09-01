@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ApplyWizz Live Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f4f7f6; margin: 0; padding: 40px; }
+        .container { max-width: 1000px; margin: auto; }
+        h1 { color: #333; }
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-top: 20px; }
+        .stat-card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); text-align: center; cursor: pointer; transition: transform 0.2s;}
+        .stat-card:hover { transform: translateY(-5px); border: 2px solid #3b82f6; }
+        .stat-title { font-size: 14px; color: #888; text-transform: uppercase; letter-spacing: 1px; font-weight: bold; }
+        .stat-value { font-size: 48px; font-weight: bold; margin-top: 10px; }
+        .text-pending { color: #f59e0b; }
+        .text-completed { color: #10b981; }
+        .text-failed { color: #ef4444; }
+        .text-total { color: #3b82f6; }
+        .header-row { display: flex; justify-content: space-between; align-items: center; }
+        button { background: #3b82f6; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; }
+        button:hover { background: #2563eb; }
+        
+        /* Table styles */
+        .details-section { margin-top: 40px; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); display: none;}
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px;}
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background-color: #f8fafc; color: #333; text-transform: uppercase; font-size: 12px;}
+        a { color: #3b82f6; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        
+        /* Modal styles */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 1000; justify-content: center; align-items: center; }
+        .modal { background: white; width: 650px; max-height: 85vh; overflow-y: auto; padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); }
+        .modal h3 { margin-top: 0; color: #111; border-bottom: 2px solid #eee; padding-bottom: 15px; font-size: 20px;}
+        .qa-item { margin-bottom: 15px; padding: 15px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; }
+        .qa-failed { border: 2px solid #ef4444; background: #fef2f2; }
+        .qa-q { font-weight: bold; color: #334155; margin-bottom: 8px; font-size: 14px; }
+        .qa-a { color: #10b981; font-size: 14px; margin: 0; font-weight: 600;}
+        .qa-a-blank { color: #94a3b8; font-style: italic; }
+        .fail-badge { background: #ef4444; color: white; font-size: 11px; padding: 3px 8px; border-radius: 4px; margin-left: 10px; font-weight: bold; vertical-align: middle; display: inline-block; }
+        .btn-close { background: #ef4444; float: right; margin-top: -5px; }
+        .btn-close:hover { background: #dc2626; }
+        .btn-view { background: #64748b; font-size: 12px; padding: 6px 12px; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        .btn-view:hover { background: #475569; }
+    </style>
+</head>
+<body>
+
+<div class="modal-overlay" id="qa-modal">
+    <div class="modal">
+        <button class="btn-close" onclick="closeModal()">Close</button>
+        <h3 id="modal-header">Application Q&A Receipt</h3>
+        <div id="modal-content"></div>
+    </div>
+</div>
+
+<div class="container">
+    <div class="header-row">
+        <h1>ApplyWizz Live Queue</h1>
+        <button onclick="fetchStats()">🔄 Refresh Data</button>
+    </div>
+    
+    <div class="stats-grid">
+        <div class="stat-card" onclick="showDetails('PENDING')" style="cursor: pointer;">
+            <div class="stat-title">PENDING JOBS</div>
+            <div class="stat-value" id="count-pending">0</div>
+        </div>
+        <div class="stat-card" onclick="showDetails('NEEDS_REVIEW')" style="cursor: pointer; border-color: #3b82f6;">
+            <div class="stat-title" style="color: #3b82f6;">NEEDS REVIEW (AI Done)</div>
+            <div class="stat-value" id="count-review" style="color: #3b82f6;">0</div>
+        </div>
+        <div class="stat-card" onclick="showDetails('APPROVED')" style="cursor: pointer; border-color: #8b5cf6;">
+            <div class="stat-title" style="color: #8b5cf6;">APPROVED (Ready to Submit)</div>
+            <div class="stat-value" id="count-approved" style="color: #8b5cf6;">0</div>
+        </div>
+        <div class="stat-card" onclick="showDetails('COMPLETED')" style="cursor: pointer;">
+            <div class="stat-title">COMPLETED</div>
+            <div class="stat-value" id="count-completed" style="color: #10b981;">0</div>
+        </div>
+        <div class="stat-card" onclick="showDetails('FAILED')">
+            <div class="stat-title">Failed / Errors</div>
+            <div class="stat-value text-failed" id="count-failed">--</div>
+        </div>
+        <div class="stat-card" onclick="showDetails('ALL')">
+            <div class="stat-title">Total in Queue</div>
+            <div class="stat-value text-total" id="count-total">--</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-title">System Cost (Monthly)</div>
+            <div class="stat-value" id="count-cost" style="color: #6366f1; font-size: 24px;">$0.00 <span style="font-size: 14px; color: #888;">(880 Units Left)</span></div>
+        </div>
+    </div>
+
+    <div class="details-section" id="details-section">
+        <h2 id="details-title">Viewing: COMPLETED</h2>
+        <p style="color: #666; margin-top: -10px; margin-bottom: 20px;">Showing the most recent 100 jobs in this category.</p>
+        <table id="jobs-table">
+            <thead id="details-head">
+                <tr>
+                    <th>ID</th>
+                    <th>Candidate</th>
+                    <th>Status</th>
+                    <th>Greenhouse Job Link</th>
+                    <th>Error Details</th>
+                    <th>Answers</th>
+                </tr>
+            </thead>
+            <tbody id="details-body">
+                <!-- Rows injected here by JavaScript -->
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    const SUPABASE_URL = "https://lnlvxsskkxeidlqgqqrj.supabase.co";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxubHZ4c3Nra3hlaWRscWdxcXJqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc5MzkxNjUsImV4cCI6MjEwMzUxNTE2NX0.0yvxG0uJXDYUQqPXRlFG_DAxpm6Ln0EsY-X1HdtFByc";
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    
+    let allJobs = [];
+    let jobDataStore = {}; // Global store to avoid JSON string escaping bugs in HTML
+
+    async function fetchStats() {
+        const targetClients = ['AWL-27321', 'AWL-32692', 'AWL-31835', 'AWL-28569', 'AWL-31072'];
+        const [pendingRes, otherRes] = await Promise.all([
+            supabaseClient.from('job_queue').select('*').eq('status', 'PENDING').in('applywizz_id', targetClients).order('id', { ascending: false }).limit(800),
+            supabaseClient.from('job_queue').select('*').neq('status', 'PENDING').in('applywizz_id', targetClients).order('id', { ascending: false }).limit(2000)
+        ]);
+        if (pendingRes.error) throw pendingRes.error;
+        if (otherRes.error) throw otherRes.error;
+        const data = [...otherRes.data, ...pendingRes.data];
+        let error = null;
+        
+        if (error) {
+            console.error("Error fetching data:", error);
+            return;
+        }
+        
+        allJobs = data; 
+        
+        let pending = 0;
+        let review = 0;
+        let approved = 0;
+        let completed = 0;
+        let failed = 0;
+
+        data.forEach(job => {
+            jobDataStore[job.id] = job; // Save the raw job data here
+            
+            if (job.status === 'PENDING') pending++;
+            else if (job.status === 'NEEDS_REVIEW') review++;
+            else if (job.status === 'APPROVED') approved++;
+            else if (job.status === 'COMPLETED') completed++;
+            else if (job.status === 'FAILED' || job.status === 'ERROR') failed++;
+        });
+
+        document.getElementById('count-pending').innerText = pending;
+        if (document.getElementById('count-review')) document.getElementById('count-review').innerText = review;
+        if (document.getElementById('count-approved')) document.getElementById('count-approved').innerText = approved;
+        document.getElementById('count-completed').innerText = completed;
+        document.getElementById('count-failed').innerText = failed;
+        document.getElementById('count-total').innerText = data.length;
+    }
+
+
+    // Display Candidate Master Dossier
+    function showDossier(applywizzId) {
+        const candidateJobs = allJobs.filter(j => j.applywizz_id === applywizzId && j.status === 'NEEDS_REVIEW');
+        if (candidateJobs.length === 0) return;
+        
+        const firstJob = candidateJobs[0];
+        const clientName = firstJob.client_name || 'Unknown';
+        
+        document.getElementById('modal-header').innerText = `Candidate Dossier: ${clientName} (${applywizzId})`;
+        const content = document.getElementById('modal-content');
+        content.innerHTML = `<p><strong>${candidateJobs.length} Jobs Pending Approval</strong></p><hr>`;
+        
+        // Show core identity from the first job
+        if (firstJob.client_profile && firstJob.client_profile.client) {
+            const p = firstJob.client_profile.client;
+            content.innerHTML += `
+                <div style="background: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                    <h3 style="margin-top: 0;">Core Identity (Verified)</h3>
+                    <p style="margin: 5px 0;"><strong>Email:</strong> ${p.personal_email || '-'}</p>
+                    <p style="margin: 5px 0;"><strong>Phone:</strong> ${p.callable_phone || '-'}</p>
+                </div>
+            `;
+        }
+        
+        // Find ALL unique questions across all their jobs (Standard + AI)
+        let uniqueQuestions = {}; // mapping question_label to the object
+        
+        candidateJobs.forEach(job => {
+            if (job.application_data && job.application_data.answer_map) {
+                job.application_data.answer_map.forEach(q => {
+                    if (!uniqueQuestions[(q.question_label || q.label)]) {
+                        uniqueQuestions[(q.question_label || q.label)] = q;
+                    }
+                });
+            }
+        });
+        
+        content.innerHTML += `<h3>All Application Answers to Review</h3>`;
+        
+        const qKeys = Object.keys(uniqueQuestions);
+        if (qKeys.length === 0) {
+            content.innerHTML += `<p style="color: #666;">No questions found.</p>`;
+        } else {
+            qKeys.forEach((qLabel, idx) => {
+                const qObj = uniqueQuestions[qLabel];
+                let ans = qObj.answer || '';
+                
+                // Format resume filename instead of long S3 URL for display
+                let displayAns = ans;
+                let isResume = (qLabel.includes('Resume') || qLabel.includes('CV'));
+                if (isResume && ans.startsWith('http')) {
+                    try {
+                        let path = new URL(ans).pathname;
+                        displayAns = decodeURIComponent(path.split('/').pop());
+                    } catch(e) {
+                        displayAns = ans.split('?')[0].split('/').pop();
+                    }
+                }
+                
+                let badge = qObj.matched_by === 'ai_fallback' ? `<span style="background-color: #3b82f6; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 10px; font-weight: bold;">ChatGPT</span>` : '';
+                if (qObj.matched_by === 'memory_bank') badge = `<span style="background-color: #8b5cf6; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 10px; font-weight: bold;">Memory Bank</span>`;
+                if (qObj.matched_by === 'needs_human_review') badge = `<span style="background-color: #f59e0b; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 10px; font-weight: bold;">⚠ You Must Select</span>`;
+                
+                content.innerHTML += `
+                    <div class="qa-item" style="margin-bottom: 15px;">
+                        <div class="qa-q" style="font-weight: bold; margin-bottom: 4px;">Q: ${qLabel} ${badge}</div>
+                        <div>
+                            ${isResume 
+                                ? `<input type="hidden" id="edit-ans-${idx}" value="${ans.replace(/"/g, '&quot;')}">
+                                   <input type="text" value="📄 ${displayAns.replace(/"/g, '&quot;')}" disabled style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit; background-color: #f3f4f6; color: #666;">` 
+                                : `<input type="text" id="edit-ans-${idx}" value="${ans.replace(/"/g, '&quot;')}" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;">`
+                            }
+                        </div>
+                    </div>
+                `;
+            });
+        }
+        
+        // Add approve button that passes the edited answers
+        content.innerHTML += `
+            <div style="margin-top: 30px; text-align: center;">
+                <button onclick="approveCandidate('${applywizzId}')" style="background-color: #10b981; color: white; font-weight: bold; padding: 15px 30px; border: none; border-radius: 6px; cursor: pointer; font-size: 16px;">
+                    ✓ Approve All ${candidateJobs.length} Jobs for ${clientName}
+                </button>
+            </div>
+        `;
+        
+        // Store the keys so the approve function knows what inputs to read
+        window.currentDossierKeys = qKeys;
+        
+        document.getElementById('qa-modal').style.display = 'flex';
+    }
+
+    async function approveCandidate(applywizzId) {
+        // 1. Gather all edited answers
+        const editedAnswers = {};
+        if (window.currentDossierKeys) {
+            window.currentDossierKeys.forEach((qLabel, idx) => {
+                const el = document.getElementById(`edit-ans-${idx}`);
+                if (el) {
+                    editedAnswers[qLabel] = el.value;
+                }
+            });
+        }
+        
+        // 2. Save these to the ai_memory_bank table
+        const memoryPromises = Object.keys(editedAnswers).map(qLabel => {
+            return supabaseClient.from('ai_memory_bank').upsert({
+                applywizz_id: applywizzId,
+                question_label: qLabel,
+                answer: editedAnswers[qLabel]
+            }, { onConflict: 'applywizz_id, question_label' });
+        });
+        await Promise.all(memoryPromises);
+        
+        // 3. Get the list of jobs being approved so we can show them
+        const candidateJobs = allJobs.filter(j => j.applywizz_id === applywizzId && j.status === 'NEEDS_REVIEW');
+        
+        // 4. Mark all their PENDING/NEEDS_REVIEW jobs as APPROVED
+        const { error } = await supabaseClient.from('job_queue')
+            .update({ status: 'APPROVED' })
+            .eq('applywizz_id', applywizzId)
+            .eq('status', 'NEEDS_REVIEW');
+            
+        if (error) {
+            alert('Failed to approve candidate jobs: ' + error.message);
+        } else {
+            // SHOW SUCCESS TOASTER / PAGE IN THE MODAL
+            const content = document.getElementById('modal-content');
+            document.getElementById('modal-header').innerText = `✅ Candidate Approved!`;
+            
+            let jobLinksHtml = candidateJobs.map(j => 
+                `<div style="padding: 10px; border: 1px solid #e2e8f0; border-radius: 6px; margin-bottom: 8px; background: #f8fafc; font-size: 13px;">
+                    <a href="${j.url}" target="_blank" style="color: #3b82f6; text-decoration: none; word-break: break-all;">${j.url}</a>
+                </div>`
+            ).join('');
+
+            content.innerHTML = `
+                <div style="text-align: center; padding: 30px 10px;">
+                    <div style="font-size: 50px; margin-bottom: 20px;">🚀</div>
+                    <h2 style="color: #10b981; margin-bottom: 10px;">Successfully Approved!</h2>
+                    <p style="font-size: 16px; color: #475569; margin-bottom: 30px;">
+                        The Muscle Worker will now automatically submit these ${candidateJobs.length} applications in the background.
+                    </p>
+                    <div style="text-align: left; max-width: 500px; margin: 0 auto;">
+                        <h4 style="margin-bottom: 10px; color: #1e293b;">Jobs Queued for Submission:</h4>
+                        ${jobLinksHtml}
+                    </div>
+                    
+                    <button onclick="closeModal(); fetchStats(); showDetails('NEEDS_REVIEW');" style="margin-top: 40px; background-color: #3b82f6; color: white; font-weight: bold; padding: 12px 24px; border: none; border-radius: 6px; cursor: pointer; font-size: 16px;">
+                        Return to Dashboard
+                    </button>
+                </div>
+            `;
+        }
+    }
+
+    // Display Modal
+    function showModal(jobId) {
+        const job = jobDataStore[jobId];
+        const appDataJson = job.application_data;
+        const jobStatus = job.status;
+        const clientName = job.client_name || 'Unknown';
+        
+        document.getElementById('modal-header').innerText = `Application Receipt: ${clientName}`;
+        const content = document.getElementById('modal-content');
+        content.innerHTML = '';
+        
+        if (!appDataJson || !appDataJson.answer_map) {
+            content.innerHTML = '<p style="color:#666;">No answer data was saved for this job. (This job was likely processed before the logging feature was added).</p>';
+        } else {
+            appDataJson.answer_map.forEach(q => {
+                
+                let isFailed = false;
+                let answerText = q.answer || '';
+                let answerClass = "qa-a";
+                let badge = "";
+                
+                if ((jobStatus === 'FAILED' || jobStatus === 'ERROR') && (answerText === '' || answerText === 'AI_PLACEHOLDER')) {
+                    isFailed = true;
+                    answerText = "LEFT BLANK (Needs AI/Human)";
+                    answerClass = "qa-a-blank";
+                    badge = `<span class="fail-badge">FAILED HERE</span>`;
+                } else if (answerText === '') {
+                    answerText = "Left blank (Optional)";
+                    answerClass = "qa-a-blank";
+                } else if (q.matched_by === 'ai_fallback') {
+                    badge = `<span style="background-color: #3b82f6; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 10px; font-weight: bold;">ChatGPT</span>`;
+                }
+
+                content.innerHTML += `
+                    <div class="qa-item ${isFailed ? 'qa-failed' : ''}">
+                        <div class="qa-q">Q: ${(q.question_label || q.label)}</div>
+                        <div class="${answerClass}">A: ${answerText} ${badge}</div>
+                    </div>
+                `;
+            });
+        }
+        
+        // Add approve button if it needs review
+        if (jobStatus === 'NEEDS_REVIEW') {
+            content.innerHTML += `
+                <div style="margin-top: 20px; text-align: center;">
+                    <button onclick="approveJob(${jobId})" style="background-color: #10b981; color: white; font-weight: bold; padding: 12px 24px; border: none; border-radius: 6px; cursor: pointer; font-size: 16px;">
+                        ✓ Approve & Submit
+                    </button>
+                </div>
+            `;
+        }
+        
+        document.getElementById('qa-modal').style.display = 'flex';
+    }
+
+    async function approveJob(jobId) {
+        const { error } = await supabaseClient.from('job_queue').update({ status: 'APPROVED' }).eq('id', jobId);
+        if (error) {
+            alert('Failed to approve job: ' + error.message);
+        } else {
+            closeModal();
+            fetchStats();
+            showDetails('NEEDS_REVIEW');
+        }
+    }
+
+    function closeModal() {
+        document.getElementById('qa-modal').style.display = 'none';
+    }
+
+    // This function makes the cards clickable
+    function showDetails(statusFilter) {
+        document.getElementById('details-section').style.display = 'block';
+        document.getElementById('details-title').innerText = `Viewing: ${statusFilter}`;
+        
+        const thead = document.getElementById('details-head');
+        const tbody = document.getElementById('details-body');
+        tbody.innerHTML = ''; 
+        
+        if (statusFilter === 'NEEDS_REVIEW') {
+            // Dossier View (Group by Candidate)
+            thead.innerHTML = `
+                <tr>
+                    <th>Candidate</th>
+                    <th>ApplyWizz ID</th>
+                    <th>Jobs Pending Approval</th>
+                    <th>Action</th>
+                </tr>
+            `;
+            
+            let reviewJobs = allJobs.filter(j => j.status === 'NEEDS_REVIEW');
+            
+            // Group by applywizz_id
+            let candidates = {};
+            reviewJobs.forEach(j => {
+                if (!candidates[j.applywizz_id]) {
+                    candidates[j.applywizz_id] = { name: j.client_name, count: 0 };
+                }
+                candidates[j.applywizz_id].count++;
+            });
+            
+            Object.keys(candidates).forEach(awId => {
+                const c = candidates[awId];
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><strong>${c.name || 'Unknown'}</strong></td>
+                    <td><span style="color: #888;">${awId}</span></td>
+                    <td><b style="color: #3b82f6;">${c.count} Jobs</b></td>
+                    <td>
+                        <button class="btn-view" style="background-color: #3b82f6;" onclick="showDossier('${awId}')">Review Dossier</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+            
+        } else {
+            // Standard Job View
+            thead.innerHTML = `
+                <tr>
+                    <th>ID</th>
+                    <th>Candidate</th>
+                    <th>Status</th>
+                    <th>Greenhouse Job Link</th>
+                    <th>Error Details</th>
+                    <th>Answers</th>
+                </tr>
+            `;
+            
+            let filteredJobs = allJobs;
+            if (statusFilter !== 'ALL') {
+                if (statusFilter === 'FAILED') {
+                    filteredJobs = allJobs.filter(j => j.status === 'FAILED' || j.status === 'ERROR');
+                } else {
+                    filteredJobs = allJobs.filter(j => j.status === statusFilter);
+                }
+            }
+
+            // Show the 100 most recent items to keep the browser fast
+            filteredJobs.slice(-100).reverse().forEach(job => {
+                const tr = document.createElement('tr');
+                
+                let statusColor = '#f59e0b';
+                if(job.status === 'COMPLETED') statusColor = '#10b981';
+                if(job.status === 'FAILED' || job.status === 'ERROR') statusColor = '#ef4444';
+                if(job.status === 'APPROVED') statusColor = '#8b5cf6';
+
+                tr.innerHTML = `
+                    <td>${job.id}</td>
+                    <td>
+                        <strong>${job.client_name || 'Unknown'}</strong><br>
+                        <span style="color: #888; font-size: 12px;">${job.applywizz_id || ''}</span>
+                        <div style="margin-top: 4px; font-size: 11px; color: #6366f1; background: #e0e7ff; padding: 2px 6px; border-radius: 4px; display: inline-block;">
+                            ⏱ ~2m &nbsp;|&nbsp; 💰 ₹0.95
+                        </div>
+                    </td>
+                    <td><b style="color: ${statusColor};">${job.status}</b></td>
+                    <td>
+                        <a href="${job.url}" target="_blank">Open Job ↗</a>
+                        ${job.application_data && job.application_data.match_score 
+                            ? `<br><span style="background: #fbbf24; color: #78350f; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; margin-top: 4px; display: inline-block;">⭐ ${job.application_data.match_score} Match</span>` 
+                            : ''}
+                    </td>
+                    <td><small style="color: #ef4444;">${job.error_message || '-'}</small></td>
+                    <td>
+                        <button class="btn-view" onclick="showModal(${job.id})">View Receipt</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+    }
+
+    fetchStats();
+    setInterval(fetchStats, 10000); // Live refresh every 10 seconds
+</script>
+
+</body>
+</html>

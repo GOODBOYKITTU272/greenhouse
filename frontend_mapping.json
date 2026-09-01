@@ -1,0 +1,89 @@
+[
+    {
+        "Question": "First Name",
+        "Available_Options": "N/A (Text Field)",
+        "Proposed_Answer": "Yakub"
+    },
+    {
+        "Question": "Last Name",
+        "Available_Options": "N/A (Text Field)",
+        "Proposed_Answer": "Ali Mohammed"
+    },
+    {
+        "Question": "Preferred First Name",
+        "Available_Options": "N/A (Text Field)",
+        "Proposed_Answer": "Yakub"
+    },
+    {
+        "Question": "Email",
+        "Available_Options": "N/A (Text Field)",
+        "Proposed_Answer": "yakubali.mohammed@applywizard.ai"
+    },
+    {
+        "Question": "Phone",
+        "Available_Options": "N/A (Text Field)",
+        "Proposed_Answer": "1234567890"
+    },
+    {
+        "Question": "Resume/CV",
+        "Available_Options": "N/A (Text Field)",
+        "Proposed_Answer": ""
+    },
+    {
+        "Question": "Cover Letter",
+        "Available_Options": "N/A (Text Field)",
+        "Proposed_Answer": ""
+    },
+    {
+        "Question": "LinkedIn Profile",
+        "Available_Options": "N/A (Text Field)",
+        "Proposed_Answer": "https://www.linkedin.com/in/yakub-mohammed"
+    },
+    {
+        "Question": "Website",
+        "Available_Options": "N/A (Text Field)",
+        "Proposed_Answer": "UNKNOWN - Requires Human/AI Input"
+    },
+    {
+        "Question": "How did you hear about this job?",
+        "Available_Options": "N/A (Text Field)",
+        "Proposed_Answer": "UNKNOWN - Requires Human/AI Input"
+    },
+    {
+        "Question": "Have you ever worked for our company before?",
+        "Available_Options": [
+            "Yes",
+            "No"
+        ],
+        "Proposed_Answer": "UNKNOWN - Requires Human/AI Input"
+    },
+    {
+        "Question": "Do you currently hold employment authorization that is temporary or subject to expiration (such as TN, OPT, STEM OPT, H-1B, EAD, or other nonimmigrant status)?",
+        "Available_Options": [
+            "Yes",
+            "No"
+        ],
+        "Proposed_Answer": "Yes"
+    },
+    {
+        "Question": "Are you authorized to work in the United States?",
+        "Available_Options": [
+            "Yes",
+            "No"
+        ],
+        "Proposed_Answer": "Yes"
+    },
+    {
+        "Question": "Opt In to receive text message updates about your application. By Opting In, you will only receive general updates about your application and interview reminders.\n",
+        "Available_Options": [
+            "Yes",
+            "No"
+        ],
+        "Proposed_Answer": "Yes"
+    },
+    {
+        "Question": "What are your base salary expectations?",
+        "Available_Options": "N/A (Text Field)",
+        "Proposed_Answer": "UNKNOWN - Requires Human/AI Input"
+    }
+]
