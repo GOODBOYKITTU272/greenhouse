@@ -170,11 +170,20 @@ class ApplyWizzBrain:
         Returns a trace dict or None.
         """
         cp = self.candidate_profile
+        phone_val = cp.get("phone")
+        if not phone_val or phone_val == "+":
+            import re
+            if getattr(self, 'resume_text', None):
+                # Look for xxx-xxx-xxxx or similar
+                match = re.search(r'\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}', self.resume_text)
+                if match:
+                    phone_val = match.group(0)
+
         mapping = {
             "first_name":       cp.get("first_name"),
             "last_name":        cp.get("last_name"),
             "email":            cp.get("email"),
-            "phone":            cp.get("phone"),
+            "phone":            phone_val,
             "resume":           cp.get("resume_url"),
             "cover_letter":     cp.get("cover_letter_url") or "",
             "linkedin_profile": cp.get("linkedin") or cp.get("linkedin_url") or "",
