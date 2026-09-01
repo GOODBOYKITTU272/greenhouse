@@ -102,7 +102,11 @@ export default function App() {
 
   // Group by candidate for the table
   const candidateStats = {};
-  allJobs.filter(j => j.status === 'NEEDS_REVIEW').forEach(j => {
+  allJobs.filter(j => {
+    if (activeTab === 'PENDING') return j.status === 'PENDING' || j.status === 'PENDING_NEW';
+    if (activeTab === 'FAILED') return j.status === 'FAILED' || j.status === 'ERROR';
+    return j.status === activeTab;
+  }).forEach(j => {
     if (!candidateStats[j.applywizz_id]) {
       candidateStats[j.applywizz_id] = { name: j.client_name, count: 0 };
     }
@@ -123,15 +127,15 @@ export default function App() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
           <div onClick={() => setActiveTab("PENDING")} className="cursor-pointer"><StatCard title="PENDING JOBS" value={stats.pending} color="text-gray-800" icon={<Clock className="w-5 h-5" />} /></div>
           <div onClick={() => setActiveTab("NEEDS_REVIEW")} className="cursor-pointer"><StatCard title="NEEDS REVIEW (AI DONE)" value={stats.needsReview} color="text-blue-500" icon={<AlertCircle className="w-5 h-5" />} /></div>
-          <StatCard title="APPROVED (READY TO SUBMIT)" value={stats.approved} color="text-purple-500" icon={<CheckCircle className="w-5 h-5" />} />
-          <StatCard title="COMPLETED" value={stats.completed} color="text-green-500" icon={<CheckCircle className="w-5 h-5" />} />
+          <div onClick={() => setActiveTab("APPROVED")} className="cursor-pointer"><StatCard title="APPROVED (READY TO SUBMIT)" value={stats.approved} color="text-purple-500" icon={<CheckCircle className="w-5 h-5" />} /></div>
+          <div onClick={() => setActiveTab("COMPLETED")} className="cursor-pointer"><StatCard title="COMPLETED" value={stats.completed} color="text-green-500" icon={<CheckCircle className="w-5 h-5" />} /></div>
           <div onClick={() => setActiveTab("FAILED")} className="cursor-pointer"><StatCard title="FAILED / ERRORS" value={stats.failed} color="text-red-500" icon={<X className="w-5 h-5" />} /></div>
           <StatCard title="TOTAL IN QUEUE" value={stats.total} color="text-blue-500" icon={<Briefcase className="w-5 h-5" />} />
         </div>
 
         {/* Candidate Table */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-          <h2 className="text-xl font-bold text-gray-800 mb-6">Viewing: NEEDS_REVIEW</h2>
+          <h2 className="text-xl font-bold text-gray-800 mb-6">Viewing: {activeTab}</h2>
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead>
@@ -153,7 +157,7 @@ export default function App() {
                         onClick={() => handleReviewDossier(id, info.name)}
                         className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                       >
-                        Review Dossier
+                        {activeTab === 'COMPLETED' ? 'View Completed' : activeTab === 'FAILED' ? 'View Errors' : 'Review Dossier'}
                       </button>
                     </td>
                   </tr>
@@ -178,28 +182,57 @@ export default function App() {
                 <button onClick={() => setSelectedCandidate(null)} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-medium">Close</button>
               </div>
               <div className="p-6 overflow-y-auto flex-1">
-                <h4 className="font-bold text-gray-800 mb-4 text-lg">All Application Answers to Review</h4>
-                <div className="space-y-4">
-                  {Object.entries(uniqueQuestions).map(([label, q], idx) => (
-                    <div key={idx} className="bg-white border border-gray-100 rounded-lg p-4 shadow-sm hover:border-blue-100 transition-colors">
-                      <p className="text-sm font-bold text-gray-700 mb-2">Q: {label}</p>
-                      <input 
-                        type="text" 
-                        value={q.displayAns}
-                        onChange={(e) => handleAnswerChange(label, e.target.value)}
-                        className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        placeholder="Type answer here..."
-                      />
-                    </div>
-                  ))}
+                <h4 className="font-bold text-gray-800 mb-4 text-lg">
+                  {activeTab === 'COMPLETED' ? 'Successfully Submitted Jobs' : 'All Application Answers to Review'}
+                </h4>
+                
+                {activeTab === 'COMPLETED' ? (
+                  <div className="space-y-6">
+                    {candidateJobs.map((job, idx) => (
+                      <div key={idx} className="bg-white border border-green-200 rounded-lg p-5 shadow-sm">
+                        <div className="flex items-center gap-2 mb-3">
+                          <CheckCircle className="w-5 h-5 text-green-500" />
+                          <a href={job.url} target="_blank" rel="noopener noreferrer" className="font-bold text-blue-600 hover:underline text-lg">
+                            {job.url}
+                          </a>
+                        </div>
+                        <div className="bg-gray-50 p-4 rounded text-sm text-gray-600">
+                           {job.application_data?.answer_map?.map((ans, i) => (
+                              <div key={i} className="mb-2 border-b border-gray-200 pb-2">
+                                <span className="font-semibold text-gray-800">{ans.question_label || ans.label}:</span> {ans.answer || <span className="italic text-gray-400">Blank</span>}
+                              </div>
+                           ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {Object.entries(uniqueQuestions).map(([label, q], idx) => (
+                      <div key={idx} className="bg-white border border-gray-100 rounded-lg p-4 shadow-sm hover:border-blue-100 transition-colors">
+                        <p className="text-sm font-bold text-gray-700 mb-2">Q: {label}</p>
+                        <input 
+                          type="text" 
+                          value={q.displayAns}
+                          onChange={(e) => handleAnswerChange(label, e.target.value)}
+                          className={activeTab === 'NEEDS_REVIEW' ? "w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500" : "w-full p-2 border-transparent bg-gray-50 rounded text-gray-700"}
+                          placeholder="Type answer here..."
+                          disabled={activeTab !== 'NEEDS_REVIEW'}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              
+              {activeTab === 'NEEDS_REVIEW' && (
+                <div className="p-6 border-t border-gray-100 bg-gray-50 rounded-b-xl flex justify-end">
+                  <button onClick={approveAll} className="bg-green-500 hover:bg-green-600 text-white px-8 py-3 rounded-xl font-bold text-lg shadow-sm flex items-center gap-2 transition-all transform hover:scale-105">
+                    <CheckCircle className="w-6 h-6" />
+                    Approve All {candidateJobs.length} Jobs
+                  </button>
                 </div>
-              </div>
-              <div className="p-6 border-t border-gray-100 bg-gray-50 rounded-b-xl flex justify-end">
-                <button onClick={approveAll} className="bg-green-500 hover:bg-green-600 text-white px-8 py-3 rounded-xl font-bold text-lg shadow-sm flex items-center gap-2 transition-all transform hover:scale-105">
-                  <CheckCircle className="w-6 h-6" />
-                  Approve All {candidateJobs.length} Jobs
-                </button>
-              </div>
+              )}
             </div>
           </div>
         )}
