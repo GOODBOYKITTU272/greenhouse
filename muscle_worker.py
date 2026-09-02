@@ -265,6 +265,88 @@ def smart_fill_field(page, label: str, answer: str, filled: list, failed: list):
     failed.append(label_clean)
 
 
+# Off by default: this path is prototyped and logically sound (built from
+# real_apply.py, a working proof-of-concept that submitted one real
+# application this way) but has not been verified end-to-end against a live
+# Greenhouse board with real OTP/S3-upload timing from this codebase. Turn on
+# deliberately once you've confirmed it against a real, low-stakes job —
+# don't flip it on for the full queue on faith.
+ENABLE_DIRECT_POST_SUBMIT = os.environ.get("ENABLE_DIRECT_POST_SUBMIT", "false").lower() == "true"
+
+
+def try_direct_post_submit(job_url, answers, resume_bytes, resume_filename):
+    """
+    Attempt to submit via a direct HTTP POST to Greenhouse's embedded-form
+    endpoint instead of driving a full browser — the same approach
+    real_apply.py proved out for one candidate. Trades ~90s+ of Playwright
+    (page load, 60s resume-upload sleep, OTP wait) for a couple of HTTP
+    requests, when it works.
+
+    Returns one of:
+      - {"outcome": "success", "confirmation_url": ..., "confirmation_text": ...}
+      - {"outcome": "validation_error", "confirmation_text": ...}
+      - None   → couldn't get a clean read (no form token found, OTP/security
+                 screen appeared — this path doesn't know how to solve that
+                 challenge over plain HTTP, or the request itself failed).
+                 Caller should fall back to the full Playwright flow. Never
+                 guess a status here; None always means "try the slow way."
+    """
+    session = requests.Session()
+    session.proxies = {"http": _proxy_url(), "https": _proxy_url()}
+
+    try:
+        from bs4 import BeautifulSoup
+        resp = session.get(job_url, allow_redirects=True, timeout=20)
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        token_input = soup.find("input", {"name": "mapped_url_token"})
+        form_tag = soup.find("form", id="application_form")
+        if not token_input or not form_tag:
+            log.info("   ⚡ Direct-POST: no embedded application form found — falling back to browser.")
+            return None
+
+        form_data = {"mapped_url_token": token_input["value"]}
+        for item in answers:
+            field_name = item.get("field_name")
+            answer = item.get("answer", "")
+            if not field_name or field_name == "demographic_question":
+                continue  # demographic_question is a synthetic name applywizz_brain uses, not a real form field
+            if not answer or answer in ("AI_PLACEHOLDER", "NEEDS_AI"):
+                continue
+            form_data[field_name] = answer
+
+        files = {}
+        if resume_bytes:
+            files["resume"] = (resume_filename, resume_bytes, "application/pdf")
+
+        submit_url = f"https://boards.greenhouse.io{form_tag['action']}"
+        submit_resp = session.post(submit_url, data=form_data, files=files, timeout=30, allow_redirects=True)
+
+        text = submit_resp.text.lower()
+        otp_keywords = ['verification code', 'security code', '8-character', 'confirm you', 'enter the code']
+        if any(kw in text for kw in otp_keywords):
+            log.info("   ⚡ Direct-POST: OTP/security screen returned — this path can't solve that, falling back to browser.")
+            return None
+
+        if "confirmation" in submit_resp.url or "application_submitted" in submit_resp.url or "thank_you" in submit_resp.url:
+            return {"outcome": "success", "confirmation_url": submit_resp.url, "confirmation_text": submit_resp.text[:1000]}
+        if "application" in text and ("received" in text or "submitted" in text):
+            return {"outcome": "success", "confirmation_url": submit_resp.url, "confirmation_text": submit_resp.text[:1000]}
+        if "is required" in text or "invalid" in text or submit_resp.status_code >= 400:
+            return {"outcome": "validation_error", "confirmation_text": submit_resp.text[:1000]}
+
+        log.info("   ⚡ Direct-POST: ambiguous response, no clean success or failure signal — falling back to browser.")
+        return None
+
+    except Exception as e:
+        log.warning(f"   ⚡ Direct-POST attempt failed ({e}) — falling back to browser.")
+        return None
+
+
+def _proxy_url():
+    return f"http://{PROXY_CONFIG['username']}:{PROXY_CONFIG['password']}@{PROXY_CONFIG['server'].replace('http://', '')}"
+
+
 def process_job(job):
     job_id = job['id']
     job_url = job['url']
@@ -305,6 +387,53 @@ def process_job(job):
             "error_message": "Missing or invalid resume; refusing to submit"
         }).eq("id", job_id).execute()
         return
+
+    # ── Try the fast path first: direct HTTP POST, no browser ──
+    if ENABLE_DIRECT_POST_SUBMIT:
+        log.info("⚡ Attempting direct-POST submission (no browser)...")
+        result = try_direct_post_submit(job_url, answers, resume_bytes, resume_filename)
+        if result and result["outcome"] == "validation_error":
+            supabase.table("job_queue").update({
+                "status": "VALIDATION_FAILED",
+                "error_message": "Direct-POST submission returned a validation error.",
+                "application_data": {**app_data, "proof": {"confirmation_text": result["confirmation_text"]}},
+            }).eq("id", job_id).execute()
+            log.error(f"❌ Job [{job_id}] VALIDATION_FAILED via direct-POST.")
+            return
+        if result and result["outcome"] == "success":
+            log.info("✅ Direct-POST submission completed. Waiting for Zoho confirmation email...")
+            proof = {
+                "confirmation_url": result["confirmation_url"],
+                "confirmation_text": result["confirmation_text"],
+                "submitted_at": datetime.now(timezone.utc).isoformat(),
+                "method": "direct_post",
+            }
+            app_data["proof"] = proof
+            supabase.table("job_queue").update({
+                "status": "SUBMITTED_EMAIL_PENDING",
+                "error_message": None,
+                "application_data": app_data,
+            }).eq("id", job_id).execute()
+            if candidate_email and confirmation_email_received(candidate_email, company_name, submit_start_ts):
+                elapsed_seconds = int(time.time() - submit_start_ts / 1000)
+                started_at_label = time.strftime("%H:%M:%S", time.localtime(submit_start_ts / 1000))
+                supabase.table("job_queue").update({
+                    "status": "VERIFIED_APPLIED",
+                    "error_message": None,
+                    "application_data": app_data,
+                    "approved_answer_map": {
+                        "started_at": started_at_label,
+                        "time_taken": f"{elapsed_seconds}s",
+                        "email": candidate_email,
+                    }
+                }).eq("id", job_id).execute()
+                log.info(f"🎉 Job [{job_id}] marked as VERIFIED_APPLIED via direct-POST.")
+            else:
+                log.warning(f"Job [{job_id}] remains SUBMITTED_EMAIL_PENDING (direct-POST).")
+            return
+        # result is None → no clean signal either way, fall through to the
+        # proven Playwright path below rather than guess.
+        log.info("⚡ Direct-POST inconclusive — falling back to full browser submission.")
 
     with sync_playwright() as p:
         try:
