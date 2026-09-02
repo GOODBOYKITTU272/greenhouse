@@ -165,6 +165,16 @@ def select_us_country_code(page):
         log.warning(f"Country selector skipped: {e}")
 
 
+def _option_plausibly_matches(option_text: str, answer: str) -> bool:
+    """Loose but non-blind check used before force-clicking an autocomplete
+    suggestion that didn't exactly contain the answer text: requires at
+    least one shared meaningful word, so we don't silently select the wrong
+    city or school just because it happened to be first in the dropdown."""
+    opt_words = {w for w in re.split(r'\W+', option_text.lower()) if len(w) >= 3}
+    ans_words = {w for w in re.split(r'\W+', answer.lower()) if len(w) >= 3}
+    return bool(opt_words & ans_words)
+
+
 def smart_fill_field(page, label: str, answer: str, filled: list, failed: list):
     if not answer or not answer.strip():
         return
@@ -182,13 +192,22 @@ def smart_fill_field(page, label: str, answer: str, filled: list, failed: list):
     try:
         selectors = page.evaluate(f"""(labelText) => {{
             let cleanTarget = labelText.replace('*', '').trim().toLowerCase().split('?')[0].trim();
-            let labels = document.querySelectorAll('label');
+            // Greenhouse renders yes/no and EEOC-style questions as a
+            // <fieldset><legend>question</legend> group, not a <label> —
+            // the label-only search below would never see these at all.
+            let questionEls = [...document.querySelectorAll('label'), ...document.querySelectorAll('legend')];
             let found = [];
-            for(let l of labels) {{
+            for(let l of questionEls) {{
                 let cleanLabel = l.innerText.replace('*', '').trim().toLowerCase().split('?')[0].trim();
                 if(cleanLabel === cleanTarget || cleanLabel.includes(cleanTarget) || cleanTarget.includes(cleanLabel)) {{
-                    let container = l.parentElement.parentElement;
+                    let container = l.tagName === 'LEGEND' ? l.parentElement : l.parentElement.parentElement;
                     if(!container) continue;
+
+                    let radios = container.querySelectorAll("input[type='radio']");
+                    if(radios.length > 0) {{
+                        if (!container.id) container.id = "custom_id_" + Math.random().toString(36).substr(2, 9);
+                        found.push('RADIO:[id="' + container.id + '"]');
+                    }}
                     let combo = container.querySelector("input[role='combobox'], input[aria-autocomplete='list']");
                     if(combo) {{
                         if (!combo.id) combo.id = "custom_id_" + Math.random().toString(36).substr(2, 9);
@@ -201,7 +220,7 @@ def smart_fill_field(page, label: str, answer: str, filled: list, failed: list):
                     }}
                     // Normal text inputs
                     let inp = container.querySelector("input[type='text'], input:not([type]), input[type='tel'], input[type='email']");
-                    if(inp && !combo) {{
+                    if(inp && !combo && radios.length === 0) {{
                         if (!inp.id) inp.id = "custom_id_" + Math.random().toString(36).substr(2, 9);
                         found.push('INPUT:[id="' + inp.id + '"]');
                     }}
@@ -226,6 +245,38 @@ def smart_fill_field(page, label: str, answer: str, filled: list, failed: list):
                 filled.append(label_clean)
                 log.info(f"   ✅ [TEXT INPUT] {label_clean} → {answer}")
                 return
+            elif selector.startswith("RADIO:"):
+                container = page.locator(selector.replace("RADIO:", ""))
+                option_labels = container.locator("label")
+                answer_norm = answer.strip().lower()
+                matched_index = None
+                # Pass 1: exact match on the individual option's own label text
+                for i in range(option_labels.count()):
+                    if option_labels.nth(i).inner_text().strip().lower() == answer_norm:
+                        matched_index = i
+                        break
+                # Pass 2: partial/contains match, for phrasing that doesn't line up exactly
+                if matched_index is None:
+                    for i in range(option_labels.count()):
+                        opt_text = option_labels.nth(i).inner_text().strip().lower()
+                        if opt_text and (answer_norm in opt_text or opt_text in answer_norm):
+                            matched_index = i
+                            break
+                if matched_index is not None:
+                    option_labels.nth(matched_index).click(force=True)
+                    filled.append(label_clean)
+                    log.info(f"   ✅ [RADIO] {label_clean} → {answer}")
+                    return
+                # Pass 3: match on the radio input's own value attribute directly
+                radio_inputs = container.locator("input[type='radio']")
+                for i in range(radio_inputs.count()):
+                    val = (radio_inputs.nth(i).get_attribute("value") or "").strip().lower()
+                    if val == answer_norm:
+                        radio_inputs.nth(i).check(force=True)
+                        filled.append(label_clean)
+                        log.info(f"   ✅ [RADIO value] {label_clean} → {answer}")
+                        return
+                log.warning(f"   ⚠️ Radio group found for '{label_clean}' but no option matched answer '{answer}'")
             else:
                 loc = page.locator(selector)
                 loc.click(force=True)
@@ -237,10 +288,13 @@ def smart_fill_field(page, label: str, answer: str, filled: list, failed: list):
                     time.sleep(2)
                     first_opt = page.locator("div[role='option']").first
                     if first_opt.count() > 0:
-                        first_opt.click(force=True)
-                        filled.append(label_clean)
-                        log.info(f"   ✅ [AUTOCOMPLETE] {label_clean} → {answer}")
-                        return
+                        opt_text = first_opt.inner_text()
+                        if _option_plausibly_matches(opt_text, answer):
+                            first_opt.click(force=True)
+                            filled.append(label_clean)
+                            log.info(f"   ✅ [AUTOCOMPLETE] {label_clean} → {answer}")
+                            return
+                        log.warning(f"   ⚠️ Autocomplete's top suggestion ('{opt_text}') doesn't resemble answer '{answer}' for {label_clean} — refusing to force-select it.")
 
                 option = page.locator(f"div[role='option']:has-text('{answer}')").first
                 if option.count() > 0:
@@ -252,7 +306,7 @@ def smart_fill_field(page, label: str, answer: str, filled: list, failed: list):
                     loc.type(answer, delay=20)
                     time.sleep(1)
                     first_opt = page.locator("div[role='option']").first
-                    if first_opt.count() > 0:
+                    if first_opt.count() > 0 and _option_plausibly_matches(first_opt.inner_text(), answer):
                         first_opt.click(force=True)
                         filled.append(label_clean)
                         log.info(f"   ✅ [COMBOBOX TYPE+CLICK] {label_clean} → {answer}")
@@ -285,14 +339,22 @@ def try_direct_post_submit(job_url, answers, resume_bytes, resume_filename):
     Returns one of:
       - {"outcome": "success", "confirmation_url": ..., "confirmation_text": ...}
       - {"outcome": "validation_error", "confirmation_text": ...}
-      - None   → couldn't get a clean read (no form token found, OTP/security
-                 screen appeared — this path doesn't know how to solve that
-                 challenge over plain HTTP, or the request itself failed).
-                 Caller should fall back to the full Playwright flow. Never
-                 guess a status here; None always means "try the slow way."
+      - {"outcome": "submitted_unknown", "confirmation_text": ..., "reason": ...}
+                 → the POST was actually sent to Greenhouse and we can't tell
+                 whether it succeeded (an OTP screen came back, the response
+                 was ambiguous, or reading the response itself failed).
+                 CRITICAL: the caller must NEVER fall back to the Playwright
+                 browser flow for this outcome — retrying via a different
+                 method after a real submission may already have landed
+                 would double-apply the candidate to a real job. Route to
+                 human review instead.
+      - None   → nothing was ever sent to Greenhouse (no form token found, or
+                 the request failed before the POST) — genuinely safe to
+                 retry via the full Playwright flow.
     """
     session = requests.Session()
     session.proxies = {"http": _proxy_url(), "https": _proxy_url()}
+    post_sent = False
 
     try:
         from bs4 import BeautifulSoup
@@ -320,13 +382,14 @@ def try_direct_post_submit(job_url, answers, resume_bytes, resume_filename):
             files["resume"] = (resume_filename, resume_bytes, "application/pdf")
 
         submit_url = f"https://boards.greenhouse.io{form_tag['action']}"
+        post_sent = True  # from this point on, never return None — that would trigger a resubmit
         submit_resp = session.post(submit_url, data=form_data, files=files, timeout=30, allow_redirects=True)
 
         text = submit_resp.text.lower()
         otp_keywords = ['verification code', 'security code', '8-character', 'confirm you', 'enter the code']
         if any(kw in text for kw in otp_keywords):
-            log.info("   ⚡ Direct-POST: OTP/security screen returned — this path can't solve that, falling back to browser.")
-            return None
+            log.warning("   ⚡ Direct-POST: form was accepted and now needs an OTP this path can't solve — routing to human review instead of resubmitting.")
+            return {"outcome": "submitted_unknown", "confirmation_text": submit_resp.text[:1000], "reason": "otp_required_after_direct_post"}
 
         if "confirmation" in submit_resp.url or "application_submitted" in submit_resp.url or "thank_you" in submit_resp.url:
             return {"outcome": "success", "confirmation_url": submit_resp.url, "confirmation_text": submit_resp.text[:1000]}
@@ -335,11 +398,14 @@ def try_direct_post_submit(job_url, answers, resume_bytes, resume_filename):
         if "is required" in text or "invalid" in text or submit_resp.status_code >= 400:
             return {"outcome": "validation_error", "confirmation_text": submit_resp.text[:1000]}
 
-        log.info("   ⚡ Direct-POST: ambiguous response, no clean success or failure signal — falling back to browser.")
-        return None
+        log.warning("   ⚡ Direct-POST: form was submitted but the response was ambiguous — routing to human review instead of resubmitting.")
+        return {"outcome": "submitted_unknown", "confirmation_text": submit_resp.text[:1000], "reason": "ambiguous_response"}
 
     except Exception as e:
-        log.warning(f"   ⚡ Direct-POST attempt failed ({e}) — falling back to browser.")
+        if post_sent:
+            log.warning(f"   ⚡ Direct-POST: form was submitted but reading the response failed ({e}) — routing to human review instead of resubmitting.")
+            return {"outcome": "submitted_unknown", "confirmation_text": "", "reason": f"exception_after_post: {e}"}
+        log.warning(f"   ⚡ Direct-POST attempt failed before any submission ({e}) — falling back to browser.")
         return None
 
 
@@ -374,6 +440,25 @@ def process_job(job):
                 resume_url = a['answer']
         if 'email' in lbl and a.get('answer'):
             candidate_email = a['answer']
+
+    if not candidate_email:
+        # This job's own question labels didn't happen to contain the word
+        # "email" (e.g. custom-worded questions) — fall back to the
+        # candidate's actual profile instead of leaving this silently None,
+        # which used to skip OTP/confirmation checking with no warning and
+        # leave the job stuck at SUBMITTED_EMAIL_PENDING forever.
+        try:
+            profile_resp = supabase.table("candidate_profiles").select("profile_json").eq("applywizz_id", applywizz_id).execute()
+            if profile_resp.data:
+                client = (profile_resp.data[0].get("profile_json") or {}).get("client", {})
+                candidate_email = client.get("company_email") or client.get("personal_email")
+                if candidate_email:
+                    log.info(f"   ℹ️ candidate_email not found in this job's answers — used candidate_profiles instead: {applywizz_id}")
+        except Exception as e:
+            log.warning(f"   Could not look up candidate_profiles for email fallback: {e}")
+
+    if not candidate_email:
+        log.warning(f"   ⚠️ No candidate_email found anywhere for job [{job_id}] ({applywizz_id}) — OTP and confirmation checks will be skipped for this job.")
 
     # FIX 3: Extract actual filename from S3 URL instead of hardcoding
     resume_bytes = None
@@ -431,8 +516,18 @@ def process_job(job):
             else:
                 log.warning(f"Job [{job_id}] remains SUBMITTED_EMAIL_PENDING (direct-POST).")
             return
-        # result is None → no clean signal either way, fall through to the
-        # proven Playwright path below rather than guess.
+        if result and result["outcome"] == "submitted_unknown":
+            # The POST was actually sent to Greenhouse — never fall back to
+            # the browser here, that would risk a real second submission.
+            supabase.table("job_queue").update({
+                "status": "SUBMISSION_UNKNOWN",
+                "error_message": f"Direct-POST was sent but outcome is unclear ({result.get('reason')}); refusing to resubmit via browser. Needs human review.",
+                "application_data": {**app_data, "proof": {"confirmation_text": result["confirmation_text"], "method": "direct_post"}},
+            }).eq("id", job_id).execute()
+            log.error(f"❌ Job [{job_id}] SUBMISSION_UNKNOWN via direct-POST — not retrying.")
+            return
+        # result is None → nothing was ever sent to Greenhouse, genuinely
+        # safe to fall through to the proven Playwright path below.
         log.info("⚡ Direct-POST inconclusive — falling back to full browser submission.")
 
     with sync_playwright() as p:
@@ -572,9 +667,21 @@ def process_job(job):
             is_success = False
             is_validation_error = False
 
+            # Specific confirmation phrases only — the previous check ("application"
+            # + "received"/"submitted" appearing anywhere on the page) could
+            # false-positive on unrelated boilerplate/disclaimer text and mark a
+            # job SUBMITTED_EMAIL_PENDING (which the dashboard counts as
+            # "Completed") without a real submission ever happening.
+            CONFIRMATION_PHRASES = [
+                "thank you for applying",
+                "your application has been received",
+                "we have received your application",
+                "application submitted successfully",
+                "your application was submitted",
+            ]
             if "confirmation" in page.url or "application_submitted" in page.url or "thank_you" in page.url:
                 is_success = True
-            elif page.locator("#application-form").count() == 0 and "application" in page_text and ("received" in page_text or "submitted" in page_text):
+            elif page.locator("#application-form").count() == 0 and any(p in page_text for p in CONFIRMATION_PHRASES):
                 is_success = True
             else:
                 # Check for visible validation errors
