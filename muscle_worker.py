@@ -120,67 +120,77 @@ def execute_dynamic_application(job_row, page):
     print("  ✅ Form completely filled dynamically.")
 
 def run_production_worker():
-    print("🚀 Fetching 1 APPROVED job from queue...")
-    res = supabase.table("job_queue").select("*").eq("status", "APPROVED").limit(1).execute()
-    jobs = res.data
-    if not jobs:
-        print("No APPROVED jobs found! Sleeping...")
-        return
-        
-    job = jobs[0]
-    job_id = job["id"]
-    job_url = job["url"]
-    company_name = job_url.split("job-boards.greenhouse.io/")[1].split("/")[0] if "greenhouse.io" in job_url else "Company"
-    
-    supabase.table("job_queue").update({"status": "CLAIMED"}).eq("id", job_id).execute()
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(proxy=PROXY, viewport={"width": 1280, "height": 900})
-        page = context.new_page()
-        
+    print("🚀 Worker started. Continuously listening for APPROVED jobs...")
+    while True:
         try:
-            page.goto(job_url, timeout=60000)
-            page.wait_for_load_state("networkidle")
-            supabase.table("job_queue").update({"status": "FILLING"}).eq("id", job_id).execute()
-            
-            # RUN DYNAMIC CORE
-            execute_dynamic_application(job, page)
-            
-            print("  🖱️ Clicking Initial Submit...")
-            page.locator("button#submit_app, input#submit_app, input[type='submit']").first.click(force=True)
-            time.sleep(5)
-            
-            # OTP CHECKER
-            if page.locator("text=A verification code was sent").count() > 0 or page.locator("input[aria-label='Digit 1']").count() > 0:
-                print("  🛑 Greenhouse OTP Challenge Detected!")
-                target_email = job.get("approved_answer_map", {}).get("email")
-                otp_code = get_zoho_otp(target_email)
-                if otp_code:
-                    print(f"  ✅ Extracted OTP: {otp_code}")
-                    for i in range(8):
-                        page.locator(f"input[aria-label='Digit {i+1}']").fill(otp_code[i])
-                    print("  🖱️ Submitting OTP...")
-                    if page.locator("button:has-text('Submit application')").count() > 0:
-                        page.locator("button:has-text('Submit application')").click(force=True)
-                        time.sleep(5)
-                else:
-                    raise Exception("OTP Timeout")
-
-            supabase.table("job_queue").update({"status": "SUBMITTED_EMAIL_PENDING"}).eq("id", job_id).execute()
-            
-            target_email = job.get("approved_answer_map", {}).get("email")
-            if check_final_email(target_email, company_name):
-                supabase.table("job_queue").update({"status": "VERIFIED_APPLIED"}).eq("id", job_id).execute()
-                print("  🟢 SUCCESS: Database marked as VERIFIED_APPLIED!")
-            else:
-                print("  🔴 Final confirmation email not received. Leaving as EMAIL_PENDING.")
+            res = supabase.table("job_queue").select("*").eq("status", "APPROVED").order("created_at", desc=False).limit(1).execute()
+            jobs = res.data
+            if not jobs:
+                time.sleep(10)
+                continue
                 
-        except Exception as e:
-            print(f"  ❌ Error executing job: {e}")
-            supabase.table("job_queue").update({"status": "ERROR", "error_message": str(e)}).eq("id", job_id).execute()
-        finally:
-            browser.close()
+            job = jobs[0]
+            job_id = job["id"]
+            job_url = job["url"]
+            company_name = job_url.split("job-boards.greenhouse.io/")[1].split("/")[0] if "greenhouse.io" in job_url else "Company"
+            
+            print(f"\n⚡ Claimed job {job_id} for {company_name} ({job_url})")
+            supabase.table("job_queue").update({"status": "CLAIMED"}).eq("id", job_id).execute()
+
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context(proxy=PROXY, viewport={"width": 1280, "height": 900})
+                page = context.new_page()
+                
+                try:
+                    page.goto(job_url, timeout=60000)
+                    page.wait_for_load_state("networkidle")
+                    supabase.table("job_queue").update({"status": "FILLING"}).eq("id", job_id).execute()
+                    
+                    # RUN DYNAMIC CORE
+                    execute_dynamic_application(job, page)
+                    
+                    print("  🖱️ Clicking Initial Submit...")
+                    page.locator("button#submit_app, input#submit_app, input[type='submit']").first.click(force=True)
+                    time.sleep(5)
+                    
+                    # OTP CHECKER
+                    if page.locator("text=A verification code was sent").count() > 0 or page.locator("input[aria-label='Digit 1']").count() > 0:
+                        print("  🛑 Greenhouse OTP Challenge Detected!")
+                        target_email = job.get("approved_answer_map", {}).get("email")
+                        otp_code = get_zoho_otp(target_email)
+                        if otp_code:
+                            print(f"  ✅ Extracted OTP: {otp_code}")
+                            for i in range(8):
+                                page.locator(f"input[aria-label='Digit {i+1}']").fill(otp_code[i])
+                            print("  🖱️ Submitting OTP...")
+                            if page.locator("button:has-text('Submit application')").count() > 0:
+                                page.locator("button:has-text('Submit application')").click(force=True)
+                                time.sleep(5)
+                        else:
+                            raise Exception("OTP Timeout")
+
+                    supabase.table("job_queue").update({"status": "SUBMITTED_EMAIL_PENDING"}).eq("id", job_id).execute()
+                    
+                    target_email = job.get("approved_answer_map", {}).get("email")
+                    if check_final_email(target_email, company_name):
+                        supabase.table("job_queue").update({"status": "VERIFIED_APPLIED"}).eq("id", job_id).execute()
+                        print("  🟢 SUCCESS: Database marked as VERIFIED_APPLIED!")
+                    else:
+                        print("  🔴 Final confirmation email not received. Leaving as EMAIL_PENDING.")
+                        
+                except Exception as e:
+                    print(f"  ❌ Error executing job: {e}")
+                    supabase.table("job_queue").update({"status": "ERROR", "error_message": str(e)}).eq("id", job_id).execute()
+                finally:
+                    browser.close()
+
+            print("⏳ Cooldown: Waiting 3 minutes before checking next job...")
+            time.sleep(180)
+
+        except Exception as loop_err:
+            print(f"⚠️ Worker loop warning: {loop_err}")
+            time.sleep(10)
 
 if __name__ == "__main__":
     run_production_worker()
