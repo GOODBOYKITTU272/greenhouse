@@ -37,7 +37,7 @@ export default function App() {
       const st = { pending: 0, needsReview: 0, approved: 0, completed: 0, failed: 0, total: data.length };
       data.forEach(j => {
         if (j.status === 'PENDING' || j.status === 'PENDING_NEW') st.pending++;
-        else if (j.status === 'NEEDS_ATTENTION' || j.status === 'PENDING_REVIEW') st.needsReview++;
+        else if (j.status === 'NEEDS_REVIEW' || j.status === 'NEEDS_ATTENTION' || j.status === 'PENDING_REVIEW') st.needsReview++;
         else if (j.status === 'APPROVED') st.approved++;
         else if (j.status === 'SUBMITTED' || j.status === 'COMPLETED' || j.status === 'VERIFIED_APPLIED' || j.status === 'SUBMITTED_EMAIL_PENDING') st.completed++;
         else if (j.status === 'FAILED' || j.status === 'ERROR') st.failed++;
