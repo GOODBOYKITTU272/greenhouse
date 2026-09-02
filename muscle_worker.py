@@ -104,6 +104,12 @@ def get_otp_from_zoho(candidate_email: str, company_name: str, after_ts_ms: int)
 
 
 def confirmation_email_received(candidate_email: str, company_name: str, after_ts_ms: int) -> bool:
+    """
+    Polls the Zoho inbox for a confirmation email. Requires BOTH a known
+    confirmation phrase AND the candidate's own email address to appear in
+    the response — matching on phrase alone let one candidate's real
+    confirmation email verify a completely different candidate's job.
+    """
     url = f"{ZOHO_READER_BASE}/api/zoho/ui/inbox"
     deadline = time.time() + 600
     params = {"email": candidate_email, "company": company_name, "receivedAfter": after_ts_ms}
@@ -112,8 +118,17 @@ def confirmation_email_received(candidate_email: str, company_name: str, after_t
             resp = requests.get(url, params=params, timeout=15)
             if resp.status_code == 200:
                 text = resp.text.lower()
-                if any(s in text for s in ["thank you for applying", "application received", "received your application"]):
+                has_confirmation_phrase = any(
+                    s in text for s in ["thank you for applying", "application received", "received your application"]
+                )
+                is_for_this_candidate = candidate_email.lower() in text
+                if has_confirmation_phrase and is_for_this_candidate:
                     return True
+                elif has_confirmation_phrase and not is_for_this_candidate:
+                    log.warning(
+                        f"   ⚠️ Confirmation phrase found but not addressed to {candidate_email}; "
+                        "ignoring to avoid cross-candidate false positive."
+                    )
         except Exception as e:
             log.warning(f"   Zoho confirmation check error: {e}")
         time.sleep(8)
@@ -440,9 +455,18 @@ def process_job(job):
                     "error_message": None
                 }).eq("id", job_id).execute()
                 if candidate_email and confirmation_email_received(candidate_email, company_name, submit_start_ts):
+                    elapsed_seconds = int(time.time() - submit_start_ts / 1000)
+                    started_at_label = time.strftime("%H:%M:%S", time.localtime(submit_start_ts / 1000))
                     supabase.table("job_queue").update({
                         "status": "VERIFIED_APPLIED",
-                        "error_message": None
+                        "error_message": None,
+                        # Real per-job telemetry only — this must never be filled with
+                        # placeholder/templated values (that's what misled the dashboard before).
+                        "approved_answer_map": {
+                            "started_at": started_at_label,
+                            "time_taken": f"{elapsed_seconds}s",
+                            "email": candidate_email,
+                        }
                     }).eq("id", job_id).execute()
                     log.info(f"🎉 Job [{job_id}] marked as VERIFIED_APPLIED in Supabase.")
                 else:

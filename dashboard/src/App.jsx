@@ -211,121 +211,72 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* Top Execution Metrics: Start Time, Duration & Cost */}
+                        {/* Top Execution Metrics: Start Time, Duration & Cost — real data only, no invented fallbacks */}
                         <div className="mb-4 bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-3">
                           <div className="grid grid-cols-3 gap-2 text-center pb-3 border-b border-gray-200">
                             <div className="border-r border-gray-200 pr-2">
                               <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Started At</p>
                               <p className="text-sm font-black text-gray-800">
-                                {job.approved_answer_map?.started_at || "21:33:18"}
+                                {job.approved_answer_map?.started_at || "Not recorded"}
                               </p>
                               <span className="text-[10px] text-gray-400">Triggered</span>
                             </div>
                             <div className="border-r border-gray-200 pr-2">
                               <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Time Taken</p>
                               <p className="text-sm font-black text-emerald-700">
-                                {job.approved_answer_map?.time_taken || "18s"}
+                                {job.approved_answer_map?.time_taken || "Not recorded"}
                               </p>
                               <span className="text-[10px] text-emerald-600 font-semibold">End-to-End</span>
                             </div>
                             <div>
                               <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Total Cost</p>
                               <p className="text-sm font-black text-blue-600">
-                                {job.approved_answer_map?.cost || "$0.0002"}
+                                {job.approved_answer_map?.cost || "Not recorded"}
                               </p>
                               <span className="text-[10px] text-blue-500 font-semibold">Proxy Bandwidth</span>
                             </div>
                           </div>
-
-                          {/* Detailed End-to-End Resource & Step Breakdown */}
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 pt-1 text-xs">
-                            <div className="bg-white rounded-lg p-2.5 border border-gray-200 space-y-1">
-                              <p className="font-bold text-gray-800 text-[11px] uppercase tracking-wider text-emerald-800 flex items-center gap-1">
-                                ⏱️ Time Breakdown ({job.approved_answer_map?.time_taken || "18s"})
-                              </p>
-                              <div className="flex justify-between text-gray-600 text-[11px]">
-                                <span>• Form Fill & S3 Resume Upload:</span>
-                                <span className="font-bold text-gray-900">8s</span>
-                              </div>
-                              <div className="flex justify-between text-gray-600 text-[11px]">
-                                <span>• Initial Submit & OTP Trigger:</span>
-                                <span className="font-bold text-gray-900">4s</span>
-                              </div>
-                              <div className="flex justify-between text-gray-600 text-[11px]">
-                                <span>• Zoho Security Code Arrival:</span>
-                                <span className="font-bold text-gray-900">6s</span>
-                              </div>
-                              <div className="flex justify-between text-gray-600 text-[11px]">
-                                <span>• Greenhouse Receipt Confirmation:</span>
-                                <span className="font-bold text-gray-900">Verified</span>
-                              </div>
-                            </div>
-
-                            <div className="bg-white rounded-lg p-2.5 border border-gray-200 space-y-1">
-                              <p className="font-bold text-gray-800 text-[11px] uppercase tracking-wider text-blue-800 flex items-center gap-1">
-                                💰 Cost & Services Breakdown
-                              </p>
-                              <div className="flex justify-between text-gray-600 text-[11px]">
-                                <span>• DataImpulse Proxy (~1.5 MB):</span>
-                                <span className="font-bold text-emerald-700">$0.0002</span>
-                              </div>
-                              <div className="flex justify-between text-gray-600 text-[11px]">
-                                <span>• Playwright Headless Worker:</span>
-                                <span className="font-bold text-gray-900">$0.00 (Self-Hosted)</span>
-                              </div>
-                              <div className="flex justify-between text-gray-600 text-[11px]">
-                                <span>• Zoho Mail Reader API:</span>
-                                <span className="font-bold text-gray-900">$0.00 (Internal)</span>
-                              </div>
-                              <div className="flex justify-between text-gray-600 text-[11px]">
-                                <span>• LLM / AI Tokens:</span>
-                                <span className="font-bold text-gray-900">$0.00 (Deterministic)</span>
-                              </div>
-                            </div>
-                          </div>
                         </div>
 
-                        {/* Full Inbound Email Preview Card */}
-                        <div className="mb-4 bg-emerald-50 border-2 border-emerald-300 rounded-xl p-5 shadow-sm space-y-4">
-                          <div className="flex items-start justify-between gap-2 border-b border-emerald-200 pb-3">
-                            <div className="flex items-center gap-3">
-                              <span className="text-3xl">📧</span>
-                              <div>
-                                <h5 className="text-base font-black text-emerald-950">
-                                  {job.approved_answer_map?.email ? "Security code for your application to Globality, Inc." : "Thank you for applying to Globality, Inc."}
-                                </h5>
-                                <p className="text-xs font-semibold text-emerald-800">
-                                  From: <span className="font-mono bg-emerald-100 px-1.5 py-0.5 rounded text-emerald-900">no-reply@us.greenhouse-mail.io</span>
-                                </p>
+                        {/* Inbound Confirmation Email — only rendered when we actually captured the email body for THIS job */}
+                        {job.approved_answer_map?.email && job.approved_answer_map?.email_body ? (
+                          <div className="mb-4 bg-emerald-50 border-2 border-emerald-300 rounded-xl p-5 shadow-sm space-y-4">
+                            <div className="flex items-start justify-between gap-2 border-b border-emerald-200 pb-3">
+                              <div className="flex items-center gap-3">
+                                <span className="text-3xl">📧</span>
+                                <div>
+                                  <h5 className="text-base font-black text-emerald-950">
+                                    {job.approved_answer_map?.email_subject || "Confirmation email"}
+                                  </h5>
+                                  <p className="text-xs font-semibold text-emerald-800">
+                                    From: <span className="font-mono bg-emerald-100 px-1.5 py-0.5 rounded text-emerald-900">{job.approved_answer_map?.email_from || "unknown sender"}</span>
+                                  </p>
+                                </div>
                               </div>
-                            </div>
-                            <span className="bg-emerald-600 text-white text-xs font-black px-3 py-1 rounded-full uppercase tracking-wider shadow-sm flex items-center gap-1">
-                              ✓ Verified In Zoho
-                            </span>
-                          </div>
-
-                          {/* Rendered Email Content Box */}
-                          <div className="bg-white rounded-xl p-4 text-sm text-gray-800 border border-emerald-200 shadow-inner font-sans space-y-3">
-                            <div className="text-xs text-gray-500 border-b border-gray-100 pb-2 flex justify-between">
-                              <span><strong>To:</strong> {job.approved_answer_map?.email || `${selectedCandidate?.client_name?.toLowerCase().replace(/\s+/g, '.')}@applywizard.ai`}</span>
-                              <span className="font-mono text-gray-400">Mailbox: {selectedCandidate?.applywizz_id}</span>
-                            </div>
-                            
-                            <div className="text-gray-900 space-y-2.5 leading-relaxed text-sm pt-1">
-                              <p className="font-semibold text-gray-900">Hi {selectedCandidate?.client_name?.split(' ')[0] || "Candidate"},</p>
-                              <p>Thank you for applying to <strong>Globality, Inc.</strong>. Your security verification and job application have been received and verified in your Zoho mailbox.</p>
-                              <p>If your application seems like a good fit for the position we will contact you soon.</p>
-                              <div className="pt-2 text-gray-700">
-                                <p>Regards,</p>
-                                <p className="font-bold text-gray-900">Globality, Inc. Hiring Team</p>
-                              </div>
+                              <span className="bg-emerald-600 text-white text-xs font-black px-3 py-1 rounded-full uppercase tracking-wider shadow-sm flex items-center gap-1">
+                                ✓ Verified In Zoho
+                              </span>
                             </div>
 
-                            <div className="text-[11px] text-gray-400 border-t border-gray-100 pt-2 italic">
-                              ** Please note: Do not reply to this email. This email is sent from an unattended mailbox. Replies will not be read.
+                            {/* Rendered Email Content Box — the actual captured body, not a canned template */}
+                            <div className="bg-white rounded-xl p-4 text-sm text-gray-800 border border-emerald-200 shadow-inner font-sans space-y-3">
+                              <div className="text-xs text-gray-500 border-b border-gray-100 pb-2 flex justify-between">
+                                <span><strong>To:</strong> {job.approved_answer_map.email}</span>
+                                <span className="font-mono text-gray-400">Mailbox: {selectedCandidate?.applywizz_id}</span>
+                              </div>
+
+                              <div className="text-gray-900 space-y-2.5 leading-relaxed text-sm pt-1 whitespace-pre-wrap">
+                                {job.approved_answer_map?.email_body || "Email body not captured."}
+                              </div>
                             </div>
                           </div>
-                        </div>
+                        ) : (
+                          <div className="mb-4 bg-yellow-50 border-2 border-yellow-300 rounded-xl p-4 text-sm text-yellow-800 font-semibold">
+                            {job.approved_answer_map?.email
+                              ? `⚠️ Confirmation matched by keyword search for ${job.approved_answer_map.email} in the Zoho inbox — the full email body was not captured for display.`
+                              : "⚠️ No confirmation email captured for this job — status reflects the browser submission only."}
+                          </div>
+                        )}
 
                         <div className="bg-gray-50 p-4 rounded-lg text-sm text-gray-700 space-y-1.5">
                           <p className="font-bold text-gray-800 text-xs uppercase tracking-wider mb-2">Submitted Candidate Data:</p>
