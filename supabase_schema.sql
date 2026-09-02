@@ -1,106 +1,86 @@
 -- ApplyWizz Database Schema
--- This script sets up the PostgreSQL database schema for the ApplyWizz job application pipeline.
+--
+-- Reconstructed from what brain_worker.py / muscle_worker.py / applywizz_brain.py /
+-- dashboard/src/App.jsx actually read and write in production. The previous version of
+-- this file described a `clients` / `job_applications` schema that nothing in the real
+-- pipeline has ever used — that draft was abandoned early and left behind by mistake.
+--
+-- This file is a reference, not a guaranteed match for the live database: run it against
+-- a fresh project, or diff it against `information_schema.columns` on the real one, before
+-- trusting it as authoritative. Columns marked "inferred" are read/written dynamically
+-- (e.g. via JSONB blobs) and may not be exhaustive.
 
--- 1. Status Enum
--- Defines the various states a job application can be in during its lifecycle.
-CREATE TYPE application_status AS ENUM (
-    'pending_extraction',
-    'pending_fuzzy',
-    'pending_ai',
-    'ready_to_apply',
-    'processing',
-    'success',
-    'failed_captcha',
-    'failed_validation'
+-- ── job_queue ──────────────────────────────────────────────────────────────
+-- One row per (candidate, job) pair. Written by brain_worker.py (PENDING → NEEDS_REVIEW
+-- or ERROR), read/updated by the dashboard (NEEDS_REVIEW → APPROVED), and driven through
+-- the rest of its lifecycle by muscle_worker.py (APPROVED → CLAIMED → FILLING →
+-- SUBMITTED_EMAIL_PENDING → VERIFIED_APPLIED, or ERROR / OTP_TIMEOUT / VALIDATION_FAILED).
+CREATE TABLE IF NOT EXISTS job_queue (
+    id                    BIGSERIAL PRIMARY KEY,
+    applywizz_id          TEXT NOT NULL,
+    client_name           TEXT,
+    url                   TEXT NOT NULL,
+    status                TEXT NOT NULL DEFAULT 'PENDING',
+    application_data      JSONB,              -- brain_worker's full answer_map + metadata
+    approved_answer_map   JSONB,              -- real per-job telemetry captured by muscle_worker
+                                               -- ({started_at, time_taken, email}) once VERIFIED_APPLIED;
+                                               -- never populate this with placeholder/templated values
+    error_message         TEXT,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- 7. clients Table (minimal)
--- Stores information about the clients (users) applying for jobs.
-CREATE TABLE clients (
-    id UUID PRIMARY KEY,
-    email TEXT UNIQUE NOT NULL,
-    full_name TEXT,
-    visa_status TEXT,
-    phone TEXT,
-    linkedin TEXT,
-    resume_s3_url TEXT,
-    default_answers JSONB,
-    created_at TIMESTAMPTZ DEFAULT now()
+CREATE INDEX IF NOT EXISTS idx_job_queue_status       ON job_queue(status);
+CREATE INDEX IF NOT EXISTS idx_job_queue_applywizz_id ON job_queue(applywizz_id);
+CREATE INDEX IF NOT EXISTS idx_job_queue_url          ON job_queue(url);
+
+-- ── job_schemas ────────────────────────────────────────────────────────────
+-- One row per unique job posting (keyed by canonical_url, tracking params stripped).
+-- Populated once via Greenhouse's public boards-api.greenhouse.io ?questions=true GET,
+-- then reused by every candidate who applies to that same posting — this is the
+-- schema-dedup cache described in brain_worker.py's get_or_cache_job_schema().
+CREATE TABLE IF NOT EXISTS job_schemas (
+    canonical_url   TEXT PRIMARY KEY,
+    raw_url         TEXT,
+    board_token     TEXT,
+    job_id          TEXT,
+    job_title       TEXT,
+    question_count  INTEGER,
+    job_data        JSONB NOT NULL,   -- raw Greenhouse job payload (questions, demographic_questions, compliance, etc.)
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- 2. job_applications Table
--- Core table storing each job application and its current state.
-CREATE TABLE job_applications (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
-    job_url TEXT NOT NULL,
-    board_token TEXT NOT NULL,
-    job_id TEXT NOT NULL,
-    job_title TEXT,
-    company_name TEXT,
-    status application_status DEFAULT 'pending_extraction',
-    answer_map JSONB,
-    resume_s3_url TEXT,
-    ai_questions_count INTEGER DEFAULT 0,
-    browserless_session_id TEXT,
-    confirmation_url TEXT,
-    error_message TEXT,
-    retry_count INTEGER DEFAULT 0,
-    created_at TIMESTAMPTZ DEFAULT now(),
-    executed_at TIMESTAMPTZ,
-    updated_at TIMESTAMPTZ DEFAULT now(),
-    UNIQUE (client_id, job_url)
+-- ── candidate_profiles ─────────────────────────────────────────────────────
+-- One row per candidate. Cached once from the CRM (apply-wizz.me/api/get-client-details)
+-- by brain_worker.py's get_or_cache_candidate() so repeat lookups don't re-hit the CRM API.
+CREATE TABLE IF NOT EXISTS candidate_profiles (
+    applywizz_id   TEXT PRIMARY KEY,
+    profile_json   JSONB NOT NULL,   -- raw CRM response: {client: {...}, additional_information: {...}}
+    resume_text    TEXT,             -- extracted PDF text, used by the AI answer layer
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- 3. Indexes
--- Index on status for the Muscle worker to quickly find ready_to_apply rows
-CREATE INDEX idx_job_applications_status ON job_applications(status);
--- Index on client_id for dashboard queries
-CREATE INDEX idx_job_applications_client_id ON job_applications(client_id);
--- Index on created_at for time-based queries
-CREATE INDEX idx_job_applications_created_at ON job_applications(created_at);
+-- ── ai_memory_bank ─────────────────────────────────────────────────────────
+-- Per-candidate cache of previously-approved answers, keyed by (applywizz_id, question_label),
+-- so the same candidate's same question is never re-resolved from scratch. NOT shared across
+-- candidates — different people can have different correct answers to an identically-worded
+-- question (this is intentional; do not "optimize" it into a cross-candidate cache).
+CREATE TABLE IF NOT EXISTS ai_memory_bank (
+    applywizz_id    TEXT NOT NULL,
+    question_label  TEXT NOT NULL,
+    answer          TEXT,
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (applywizz_id, question_label)
+);
 
--- 5. Auto-update updated_at trigger
--- Function to update the updated_at column to the current time
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = now();
-    RETURN NEW;
-END;
-$$ language 'plpgsql';
-
--- Trigger to execute the function on any row update
-CREATE TRIGGER update_job_applications_modtime
-BEFORE UPDATE ON job_applications
-FOR EACH ROW
-EXECUTE FUNCTION update_updated_at_column();
-
--- 4. RPC Function: claim_next_job
--- Concurrency-safe function for the Muscle worker to atomically grab the next job
-CREATE OR REPLACE FUNCTION claim_next_job(worker_id TEXT)
-RETURNS SETOF job_applications AS $$
-  UPDATE job_applications
-  SET status = 'processing',
-      browserless_session_id = worker_id,
-      updated_at = now()
-  WHERE id = (
-    SELECT id FROM job_applications
-    WHERE status = 'ready_to_apply'
-    ORDER BY created_at ASC
-    LIMIT 1
-    FOR UPDATE SKIP LOCKED
-  )
-  RETURNING *;
-$$ LANGUAGE sql;
-
--- 6. Row Level Security (RLS)
--- Enable RLS on the job_applications table
-ALTER TABLE job_applications ENABLE ROW LEVEL SECURITY;
-
--- Clients can only SELECT their own rows
-CREATE POLICY select_own_applications 
-ON job_applications FOR SELECT 
-USING (client_id = auth.uid());
-
--- Note: Service role inherently bypasses RLS in Supabase. Backend workers using the service_role key will have full access.
+-- ── Row Level Security ─────────────────────────────────────────────────────
+-- All four tables above should have RLS enabled with no permissive anon policy: the
+-- dashboard's anon key is used client-side (visible in the deployed JS bundle), and every
+-- one of these tables holds PII (candidate address/DOB/race/disability/veteran status) or
+-- lets a caller flip a job to APPROVED. Service-role access (used by brain_worker.py /
+-- muscle_worker.py) bypasses RLS by design; that's fine, that key never leaves the server.
+--
+-- Verify this is actually true in the live project — RLS state isn't visible from this repo:
+--   select relname, relrowsecurity from pg_class
+--   where relname in ('job_queue','job_schemas','candidate_profiles','ai_memory_bank');

@@ -30,8 +30,11 @@ logging.basicConfig(
 )
 log = logging.getLogger("MUSCLE")
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://lnlvxsskkxeidlqgqqrj.supabase.co")
-SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxubHZ4c3Nra3hlaWRscWdxcXJqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzkzOTE2NSwiZXhwIjoyMTAzNTE1MTY1fQ.trCeN-N7Ufz5L8nkLaWzUaaEhR74GBqiyBI6J59jYLo")
+# No hardcoded fallback: a leaked service_role key bypasses RLS entirely, so
+# this must only ever come from the deploy environment. Fail loudly if unset
+# rather than silently running with a stale/leaked default.
+SUPABASE_URL = os.environ["SUPABASE_URL"]
+SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 WORKER_ID = os.environ.get("RAILWAY_REPLICA_ID") or os.environ.get("HOSTNAME") or "local-muscle-worker"
 SCREENSHOT_DIR = os.environ.get("SCREENSHOT_DIR", "screenshots")
 
