@@ -253,7 +253,7 @@ def process_job(job):
             # FIX 1: DataImpulse Residential Proxy — properly set in new_context
             context = browser.new_context(
                 viewport={"width": 1280, "height": 900},
-                
+                proxy=PROXY_CONFIG
             )
             log.info(f"🛡️ DataImpulse Residential Proxy ACTIVE: {PROXY_CONFIG['server']}")
 
