@@ -496,13 +496,31 @@ def process_job(job):
             log.error(f"Job [{job_id}] marked as ERROR.")
 
 
+# The SELECT+UPDATE fallback below has a race: two workers can both read the
+# same APPROVED row before either flips its status, and both submit it. Safe
+# with exactly one worker; unsafe with the multiple Railway replicas we run
+# in production. Only opt into it explicitly (e.g. a single local dev run
+# without the RPC deployed) — never let it happen silently under scale.
+ALLOW_UNSAFE_CLAIM_FALLBACK = os.environ.get("ALLOW_UNSAFE_CLAIM_FALLBACK", "false").lower() == "true"
+
+
 def claim_next_job():
     try:
         res = supabase.rpc("claim_next_approved_job", {"worker_id": WORKER_ID}).execute()
         if res.data:
             return res.data[0]
+        return None
     except Exception as e:
-        log.warning(f"RPC claim failed, using single-worker fallback: {e}")
+        if not ALLOW_UNSAFE_CLAIM_FALLBACK:
+            log.error(
+                f"💥 claim_next_approved_job RPC failed: {e}. Refusing to fall back to the "
+                "non-atomic claim query because it double-submits jobs under concurrent "
+                "workers. Skipping this cycle — fix the RPC (see 01_claim_next_approved_job.sql) "
+                "or set ALLOW_UNSAFE_CLAIM_FALLBACK=true if you are intentionally running a "
+                "single worker without it."
+            )
+            return None
+        log.warning(f"RPC claim failed, using single-worker fallback (UNSAFE for >1 worker): {e}")
 
     res = supabase.table("job_queue").select("*").eq("status", "APPROVED").order("created_at").limit(1).execute()
     if not res.data:
