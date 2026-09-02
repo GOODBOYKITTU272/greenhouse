@@ -194,7 +194,13 @@ def get_or_cache_candidate(supabase, applywizz_id):
         raise Exception(f"CRM API returned {api_resp.status_code} for {applywizz_id}")
 
     profile_json = api_resp.json()
-    resume_url   = profile_json.get("additional_information", {}).get("resume_url", "")
+    if not isinstance(profile_json, dict) or not profile_json.get("client"):
+        # CRM returned 200 with a null/empty/malformed body — a real, distinct
+        # failure from an HTTP error, but process_pending_jobs' except block
+        # still needs something to catch instead of crashing on .get() below.
+        raise Exception(f"CRM API returned no usable profile for {applywizz_id} (got: {profile_json!r})")
+
+    resume_url = profile_json.get("additional_information", {}).get("resume_url", "")
     resume_text  = extract_resume_text(resume_url)
 
     supabase.table("candidate_profiles").upsert({
