@@ -198,19 +198,57 @@ export default function App() {
                 {activeTab === 'COMPLETED' ? (
                   <div className="space-y-6">
                     {candidateJobs.map((job, idx) => (
-                      <div key={idx} className="bg-white border border-green-200 rounded-lg p-5 shadow-sm">
-                        <div className="flex items-center gap-2 mb-3">
-                          <CheckCircle className="w-5 h-5 text-green-500" />
-                          <a href={job.url} target="_blank" rel="noopener noreferrer" className="font-bold text-blue-600 hover:underline text-lg">
-                            {job.url}
+                      <div key={idx} className="bg-white border-2 border-green-200 rounded-xl p-5 shadow-sm">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 pb-3 border-b border-gray-100">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle className="w-6 h-6 text-green-500 flex-shrink-0" />
+                            <a href={job.url} target="_blank" rel="noopener noreferrer" className="font-bold text-blue-600 hover:underline text-base break-all">
+                              {job.url}
+                            </a>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="bg-green-100 text-green-800 text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1">
+                              ✓ VERIFIED_APPLIED
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Direct Zoho Mail Reader Link */}
+                        <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-3.5 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xl">📧</span>
+                            <div>
+                              <p className="text-xs font-bold text-blue-900">Zoho Mail Confirmation Verified</p>
+                              <p className="text-xs text-blue-700">Account: anjana.prasad@applywizard.ai</p>
+                            </div>
+                          </div>
+                          <a 
+                            href="https://zoho-mail-reader.onrender.com/api/zoho/ui/inbox?email=anjana.prasad@applywizard.ai&limit=5" 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-md shadow-sm transition-colors"
+                          >
+                            View Zoho Inbox JSON ↗
                           </a>
                         </div>
-                        <div className="bg-gray-50 p-4 rounded text-sm text-gray-600">
-                           {job.application_data?.answer_map?.map((ans, i) => (
-                              <div key={i} className="mb-2 border-b border-gray-200 pb-2">
-                                <span className="font-semibold text-gray-800">{ans.question_label || ans.label}:</span> {ans.answer || <span className="italic text-gray-400">Blank</span>}
+
+                        <div className="bg-gray-50 p-4 rounded-lg text-sm text-gray-700 space-y-1.5">
+                          <p className="font-bold text-gray-800 text-xs uppercase tracking-wider mb-2">Submitted Candidate Data:</p>
+                          {job.approved_answer_map ? (
+                            Object.entries(job.approved_answer_map).map(([k, v], i) => (
+                              <div key={i} className="flex justify-between border-b border-gray-200 py-1 text-xs">
+                                <span className="font-semibold text-gray-600 capitalize">{k.replace('_', ' ')}:</span>
+                                <span className="text-gray-900 font-medium truncate max-w-xs">{String(v)}</span>
                               </div>
-                           ))}
+                            ))
+                          ) : (
+                            job.application_data?.answer_map?.map((ans, i) => (
+                              <div key={i} className="flex justify-between border-b border-gray-200 py-1 text-xs">
+                                <span className="font-semibold text-gray-600">{ans.question_label || ans.label}:</span>
+                                <span className="text-gray-900 font-medium truncate max-w-xs">{ans.answer || 'Blank'}</span>
+                              </div>
+                            ))
+                          )}
                         </div>
                       </div>
                     ))}
