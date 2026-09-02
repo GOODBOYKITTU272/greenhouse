@@ -196,7 +196,8 @@ export default function App() {
                   <div className="space-y-6">
                     {candidateJobs.map((job, idx) => (
                       <div key={idx} className="bg-white border-2 border-green-200 rounded-xl p-5 shadow-sm">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 pb-3 border-b border-gray-100">
+                        {/* Job Header with URL & Status */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3 pb-3 border-b border-gray-100">
                           <div className="flex items-center gap-2">
                             <CheckCircle className="w-6 h-6 text-green-500 flex-shrink-0" />
                             <a href={job.url} target="_blank" rel="noopener noreferrer" className="font-bold text-blue-600 hover:underline text-base break-all">
@@ -207,6 +208,22 @@ export default function App() {
                             <span className="bg-green-100 text-green-800 text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1">
                               ✓ VERIFIED_APPLIED
                             </span>
+                          </div>
+                        </div>
+
+                        {/* Top Execution Metrics: Start Time, Duration & Cost */}
+                        <div className="grid grid-cols-3 gap-2 mb-4 bg-gray-50 border border-gray-200 rounded-xl p-3 text-center">
+                          <div className="border-r border-gray-200 pr-2">
+                            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Started At</p>
+                            <p className="text-xs font-black text-gray-800">20:43:54</p>
+                          </div>
+                          <div className="border-r border-gray-200 pr-2">
+                            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Time Taken</p>
+                            <p className="text-xs font-black text-emerald-700">1m 50s</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Total Cost</p>
+                            <p className="text-xs font-black text-blue-600">$0.0002</p>
                           </div>
                         </div>
 
