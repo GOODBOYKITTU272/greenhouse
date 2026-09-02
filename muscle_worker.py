@@ -165,6 +165,61 @@ def select_us_country_code(page):
         log.warning(f"Country selector skipped: {e}")
 
 
+_DECLINE_MARKERS = ["wish to answer", "prefer not", "decline", "elect not", "prefer to self-describe", "self-describe"]
+_NEGATION_RE = re.compile(r"\bnot\b|\bno\b|n['’]t\b", re.IGNORECASE)
+
+
+def _select_polarity(text: str) -> str:
+    """
+    Classify an EEOC-style option (or the candidate's answer) as affirmative,
+    negative, or neutral/decline-to-answer. Confirmed empirically against
+    222 real scanned Greenhouse jobs: veteran-status wording alone has 12
+    distinct phrasings, disability-status has 9 — a plain string match only
+    works for the single most common phrasing. This exists so a fuzzy word-
+    overlap match can never flip Yes<->No on a real EEOC question just
+    because two options happen to share unrelated words (e.g. both a "Yes,
+    I have a disability" and "No, I don't have a disability" option share
+    the words "have" and "disability").
+    """
+    t = text.lower()
+    if any(m in t for m in _DECLINE_MARKERS):
+        return "decline"
+    if _NEGATION_RE.search(t):
+        return "negative"
+    return "affirmative"
+
+
+def pick_matching_select_option(answer: str, option_texts: list) -> Optional[str]:
+    """
+    Find which real <option> text on THIS specific job's form best matches
+    `answer`, tolerating the wide per-company wording variation Greenhouse
+    allows for the same underlying question. Never crosses polarity (never
+    returns a "Yes" option for a "No" answer or vice versa) and never picks
+    a decline-to-answer option unless the answer itself is a decline.
+    """
+    answer_polarity = _select_polarity(answer)
+    candidates = [t for t in option_texts if _select_polarity(t) == answer_polarity]
+    if not candidates and answer_polarity != "decline":
+        # Nothing shares polarity (e.g. a differently-structured question) —
+        # fall back to every non-decline option rather than give up entirely.
+        candidates = [t for t in option_texts if _select_polarity(t) != "decline"]
+    if not candidates:
+        return None
+
+    ans_words = {w for w in re.split(r'\W+', answer.lower()) if len(w) >= 4}
+    best, best_score = None, -1
+    for t in candidates:
+        opt_words = {w for w in re.split(r'\W+', t.lower()) if len(w) >= 4}
+        score = len(ans_words & opt_words)
+        if score > best_score:
+            best_score, best = score, t
+    if best_score > 0:
+        return best
+    # No shared substantive words either — only safe to guess when polarity
+    # narrowed it down to exactly one option.
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def _option_plausibly_matches(option_text: str, answer: str) -> bool:
     """Loose but non-blind check used before force-clicking an autocomplete
     suggestion that didn't exactly contain the answer text: requires at
@@ -180,14 +235,6 @@ def smart_fill_field(page, label: str, answer: str, filled: list, failed: list):
         return
 
     label_clean = label.replace('*', '').strip()
-
-    # Pre-process Answer Strings to match exactly
-    if answer == "Straight":
-        answer = "Heterosexual"
-    elif answer == "I am not a protected veteran":
-        answer = "I do not fall into one of the above categories of “protected veteran”"
-    elif answer == "No, I do not have a disability":
-        answer = "No, I don’t have a disability"
 
     try:
         selectors = page.evaluate(f"""(labelText) => {{
@@ -236,10 +283,26 @@ def smart_fill_field(page, label: str, answer: str, filled: list, failed: list):
 
         for selector in selectors:
             if selector.startswith("SELECT:"):
-                page.locator(selector.replace("SELECT:", "")).select_option(label=re.compile(f"^{answer}$", re.IGNORECASE))
-                filled.append(label_clean)
-                log.info(f"   ✅ [NATIVE SELECT] {label_clean} → {answer}")
-                return
+                select_loc = page.locator(selector.replace("SELECT:", ""))
+                try:
+                    select_loc.select_option(label=re.compile(f"^{answer}$", re.IGNORECASE))
+                    filled.append(label_clean)
+                    log.info(f"   ✅ [NATIVE SELECT] {label_clean} → {answer}")
+                    return
+                except Exception:
+                    # Exact match failed — this question's real wording on
+                    # THIS job differs from the canonical phrasing (confirmed
+                    # common: e.g. veteran-status wording alone has 12+ real
+                    # variants across companies). Read the real options and
+                    # pick the best safe match instead of aborting the job.
+                    real_option_texts = select_loc.locator("option").all_inner_texts()
+                    match = pick_matching_select_option(answer, real_option_texts)
+                    if match:
+                        select_loc.select_option(label=match)
+                        filled.append(label_clean)
+                        log.info(f"   ✅ [NATIVE SELECT, wording variant] {label_clean} → '{answer}' matched to real option '{match}'")
+                        return
+                    log.warning(f"   ⚠️ No safe option match for '{label_clean}' → '{answer}' among real options: {real_option_texts}")
             elif selector.startswith("INPUT:"):
                 page.locator(selector.replace("INPUT:", "")).fill(answer)
                 filled.append(label_clean)
