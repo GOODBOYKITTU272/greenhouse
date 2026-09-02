@@ -214,32 +214,36 @@ export default function App() {
                         </div>
 
                         {/* Direct Zoho Mail Reader Link */}
-                        <div className="mb-4 bg-blue-50 border border-blue-200 rounded-xl p-4 shadow-inner space-y-3">
+                        <div className="mb-4 bg-emerald-50 border-2 border-emerald-300 rounded-xl p-4 shadow-sm space-y-3">
                           <div className="flex items-start justify-between gap-2">
-                            <div className="flex items-center gap-2">
-                              <span className="text-2xl">📧</span>
+                            <div className="flex items-center gap-2.5">
+                              <span className="text-3xl">🎉</span>
                               <div>
-                                <p className="text-sm font-extrabold text-blue-900">Security code for your application to AQR</p>
-                                <p className="text-xs font-semibold text-blue-700">From: <code className="bg-blue-100 px-1 py-0.5 rounded text-blue-900">no-reply@us.greenhouse-mail.io</code></p>
+                                <p className="text-base font-black text-emerald-900">Thank you for applying to Globality, Inc.</p>
+                                <p className="text-xs font-semibold text-emerald-700">From: <code className="bg-emerald-100 px-1.5 py-0.5 rounded text-emerald-950 font-mono">no-reply@us.greenhouse-mail.io</code></p>
                               </div>
                             </div>
-                            <span className="bg-green-600 text-white text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">
-                              Verified
+                            <span className="bg-emerald-600 text-white text-[11px] font-black px-3 py-1 rounded-full uppercase tracking-wider shadow-sm">
+                              Confirmed Applied
                             </span>
                           </div>
 
-                          <div className="bg-white/80 rounded-lg p-2.5 text-xs text-gray-700 border border-blue-100 space-y-1">
+                          <div className="bg-white/90 rounded-lg p-3 text-xs text-gray-800 border border-emerald-200 space-y-1.5">
                             <div className="flex justify-between">
-                              <span className="text-gray-500 font-medium">To Mailbox:</span>
-                              <span className="font-bold text-gray-800">anjana.prasad@applywizard.ai</span>
+                              <span className="text-gray-500 font-semibold">Official Subject:</span>
+                              <span className="font-bold text-gray-900">Thank you for applying to Globality, Inc.</span>
                             </div>
                             <div className="flex justify-between">
-                              <span className="text-gray-500 font-medium">Message ID:</span>
-                              <span className="font-mono text-[11px] text-gray-600">1788360298001118201</span>
+                              <span className="text-gray-500 font-semibold">Candidate Mailbox:</span>
+                              <span className="font-bold text-gray-900">anjana.prasad@applywizard.ai</span>
                             </div>
                             <div className="flex justify-between">
-                              <span className="text-gray-500 font-medium">Status:</span>
-                              <span className="text-green-700 font-bold">100% Matched in Zoho Inbox</span>
+                              <span className="text-gray-500 font-semibold">Message ID:</span>
+                              <span className="font-mono text-[11px] text-gray-600">1788362144512125600</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-500 font-semibold">Received Timestamp:</span>
+                              <span className="font-mono text-[11px] text-gray-700">1788362144510</span>
                             </div>
                           </div>
 
@@ -248,9 +252,10 @@ export default function App() {
                               href="https://zoho-mail-reader.onrender.com/api/zoho/ui/inbox?email=anjana.prasad@applywizard.ai&limit=5" 
                               target="_blank" 
                               rel="noopener noreferrer"
-                              className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow transition-all flex items-center gap-1"
+                              className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold px-3.5 py-2 rounded-lg shadow transition-all flex items-center gap-1.5"
                             >
-                              Open Live Zoho Mailbox JSON ↗
+                              <span>View Live Zoho Mail Inbox JSON</span>
+                              <span>↗</span>
                             </a>
                           </div>
                         </div>
