@@ -17,11 +17,11 @@ except ImportError:
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 
-SUPABASE_URL = "https://lnlvxsskkxeidlqgqqrj.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxubHZ4c3Nra3hlaWRscWdxcXJqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzkzOTE2NSwiZXhwIjoyMTAzNTE1MTY1fQ.trCeN-N7Ufz5L8nkLaWzUaaEhR74GBqiyBI6J59jYLo"
+SUPABASE_URL = os.environ["SUPABASE_URL"]
+SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 
 def get_db_client():
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
+    return create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 # ─────────────────────────────────────────────
 # RESUME TEXT EXTRACTOR
@@ -123,6 +123,26 @@ def get_or_cache_job_schema(supabase, raw_url):
 
     api_url = f"https://boards-api.greenhouse.io/v1/boards/{board_token}/jobs/{job_id}?questions=true"
     resp = requests.get(api_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+    
+    # Custom domain fallback: if board_token from subdomain 404s, fetch HTML to get true board token
+    if resp.status_code == 404:
+        logging.info(f"  Retrying custom domain discovery for {canonical}...")
+        try:
+            page_resp = requests.get(canonical, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+            # Look for board token in meta tags or embedded script
+            m_token = re.search(r'["\']boardToken["\']:\s*["\']([^"\']+)["\']', page_resp.text) or \
+                      re.search(r'boards\.greenhouse\.io/([^/]+)/jobs', page_resp.text) or \
+                      re.search(r'data-board="([^"]+)"', page_resp.text) or \
+                      re.search(r'greenhouse\.io/([^/]+)/', page_resp.text)
+            if m_token:
+                real_token = m_token.group(1)
+                logging.info(f"  🎯 Discovered true Greenhouse board token: {real_token}")
+                api_url = f"https://boards-api.greenhouse.io/v1/boards/{real_token}/jobs/{job_id}?questions=true"
+                resp = requests.get(api_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+                board_token = real_token
+        except Exception as e:
+            logging.warning(f"  Custom domain lookup failed: {e}")
+
     resp.raise_for_status()
     job_data = resp.json()
 
@@ -215,12 +235,12 @@ def build_candidate_dict(applywizz_id, profile_json):
         "website":               add_info.get("github_url", ""),
         "resume_url":            add_info.get("resume_url", ""),
         "cover_letter_url":      add_info.get("cover_letter_path", "") or "",
-        "visa_status":           client.get("visa_type", "Citizen"),
-        "require_sponsorship":   add_info.get("require_future_sponsorship", False),
-        "sponsorship":           client.get("sponsorship", False),
+        "visa_status":           client.get("visa_type"),
+        "require_sponsorship":   add_info.get("require_future_sponsorship"),
+        "sponsorship":           client.get("sponsorship"),
         "salary_expectation":    client.get("salary_range", "Open to discussion"),
-        "willing_to_relocate":   add_info.get("willing_to_relocate", True),
-        "can_work_onsite":       add_info.get("can_work_3_days_in_office", True),
+        "willing_to_relocate":   add_info.get("willing_to_relocate"),
+        "can_work_onsite":       add_info.get("can_work_3_days_in_office"),
         "highest_education":     add_info.get("highest_education", ""),
         "university":            add_info.get("university_name", ""),
         "gpa":                   add_info.get("cumulative_gpa", ""),
@@ -239,14 +259,14 @@ def build_candidate_dict(applywizz_id, profile_json):
         "sexual_orientation":    add_info.get("sexual_orientation", None),
         "transgender_status":    add_info.get("transgender_status", None),
         "eeoc_unanswered_policy": add_info.get("eeoc_unanswered_policy", "ASK"),
-        "is_over_18":            add_info.get("is_over_18", True),
-        "eligible_to_work_in_us": add_info.get("eligible_to_work_in_us", True),
-        "willing_background_check": add_info.get("willing_background_check", True),
-        "willing_drug_screen":   add_info.get("willing_drug_screen", True),
-        "convicted_of_felony":   add_info.get("convicted_of_felony", False),
-        "pending_investigation": add_info.get("pending_investigation", False),
-        "discharged_for_policy_violation": add_info.get("discharged_for_policy_violation", False),
-        "can_provide_legal_docs": add_info.get("can_provide_legal_docs", True),
+        "is_over_18":            add_info.get("is_over_18"),
+        "eligible_to_work_in_us": add_info.get("eligible_to_work_in_us"),
+        "willing_background_check": add_info.get("willing_background_check"),
+        "willing_drug_screen":   add_info.get("willing_drug_screen"),
+        "convicted_of_felony":   add_info.get("convicted_of_felony"),
+        "pending_investigation": add_info.get("pending_investigation"),
+        "discharged_for_policy_violation": add_info.get("discharged_for_policy_violation"),
+        "can_provide_legal_docs": add_info.get("can_provide_legal_docs"),
         "date_of_birth":         add_info.get("date_of_birth", ""),
         "has_relatives_in_company": add_info.get("has_relatives_in_company"),
         "_full_client":          client,
@@ -261,9 +281,7 @@ def process_pending_jobs():
     supabase = get_db_client()
     logging.info("BRAIN WORKER: Checking for PENDING jobs...")
 
-    response = supabase.table("job_queue").select("*").eq("status", "PENDING_NEW").in_(
-        "applywizz_id", ["AWL-27321", "AWL-32692", "AWL-31835", "AWL-28569", "AWL-31072"]
-    ).limit(50).execute()
+    response = supabase.table("job_queue").select("*").in_("status", ["PENDING", "PENDING_NEW"]).order("created_at", desc=False).limit(50).execute()
     jobs = response.data
 
     if not jobs:

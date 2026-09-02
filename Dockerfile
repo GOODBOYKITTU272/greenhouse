@@ -11,5 +11,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the application
 COPY . .
 
-# Run the worker script
-CMD ["python3", "-u", "muscle_worker.py"]
+# Run both workers via start.sh
+RUN chmod +x start.sh
+CMD ["./start.sh"]

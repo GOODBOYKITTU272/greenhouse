@@ -7,49 +7,72 @@ from supabase import create_client
 from playwright.sync_api import sync_playwright
 
 # --- CONFIG ---
-SUPABASE_URL = "https://lnlvxsskkxeidlqgqqrj.supabase.co"
-SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxubHZ4c3Nra3hlaWRscWdxcXJqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzkzOTE2NSwiZXhwIjoyMTAzNTE1MTY1fQ.trCeN-N7Ufz5L8nkLaWzUaaEhR74GBqiyBI6J59jYLo") 
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://lnlvxsskkxeidlqgqqrj.supabase.co")
+SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-ZOHO_API = "https://zoho-mail-reader.onrender.com/api/zoho/messages"
+ZOHO_BASE = os.environ.get("ZOHO_BASE_URL", "https://zoho-mail-reader.onrender.com")
+
 PROXY = {
-    "server": "http://gw.dataimpulse.com:823",
+    "server": os.environ.get("PROXY_SERVER", "http://gw.dataimpulse.com:823"),
     "username": os.environ.get("PROXY_USERNAME", "7dfdbfd6f547946ba484"),
     "password": os.environ.get("PROXY_PASSWORD", "64b2edaac0ebaf3e")
 }
 
-def get_zoho_otp(email_address):
+def get_zoho_otp(email_address, start_time_ms=0):
     print(f"  🔑 Polling Zoho for Greenhouse OTP for {email_address}...")
-    for _ in range(12): 
+    for attempt in range(25): 
         try:
-            r = requests.get(f"{ZOHO_API}?email={email_address}&limit=5")
-            if r.status_code == 200:
-                msgs = r.json().get("data", [])
+            # 1. Dedicated security code endpoint
+            url = f"{ZOHO_BASE}/api/zoho/greenhouse-security-code?email={email_address}&receivedAfter={start_time_ms}"
+            r = requests.get(url, timeout=10)
+            if r.status_code == 200 and r.json().get("found"):
+                code = r.json().get("code")
+                if code:
+                    return str(code).strip()
+
+            # 2. Direct inbox fallback scanner
+            r_inbox = requests.get(f"{ZOHO_BASE}/api/zoho/ui/inbox?email={email_address}&limit=5", timeout=10)
+            if r_inbox.status_code == 200:
+                msgs = r_inbox.json().get("messages", [])
                 for m in msgs:
-                    subj = m.get("subject", "").lower()
-                    if "verification code" in subj or "verify your email" in subj:
-                        match = re.search(r'\b\d{8}\b', m.get("text", ""))
-                        if match:
-                            return match.group(0)
-        except Exception:
+                    subj = str(m.get("subject", ""))
+                    try:
+                        received_ms = int(m.get("receivedTime", 0))
+                    except Exception:
+                        received_ms = 0
+
+                    if "security code" in subj.lower() and (start_time_ms == 0 or received_ms >= (start_time_ms - 60000)):
+                        summary = str(m.get("summary", ""))
+                        matches = re.findall(r'\b[A-Za-z0-9]{8}\b', summary)
+                        for code in matches:
+                            if not code.lower().startswith("glob") and not code.lower().startswith("secu"):
+                                return code
+        except Exception as e:
             pass
-        time.sleep(15)
+        time.sleep(6)
     return None
 
-def check_final_email(email_address, company_keyword):
+def check_final_email(email_address, company_keyword, start_time_ms=0):
     print(f"  📧 Polling Zoho for 'Thank you for applying' from {company_keyword}...")
-    for _ in range(12):
+    for attempt in range(35):
         try:
-            r = requests.get(f"{ZOHO_API}?email={email_address}&limit=5")
+            r = requests.get(f"{ZOHO_BASE}/api/zoho/ui/inbox?email={email_address}&limit=5", timeout=10)
             if r.status_code == 200:
-                msgs = r.json().get("data", [])
+                msgs = r.json().get("messages", [])
                 for m in msgs:
-                    subj = m.get("subject", "").lower()
-                    if "thank you for applying" in subj or "application received" in subj:
-                        return True
+                    subj = str(m.get("subject", ""))
+                    try:
+                        received_ms = int(m.get("receivedTime", 0))
+                    except Exception:
+                        received_ms = 0
+                    if start_time_ms == 0 or received_ms >= (start_time_ms - 60000):
+                        if any(kw in subj.lower() for kw in ["thank you for applying", "application received", company_keyword.lower()]):
+                            print(f"  🏆 Inbound email verified: '{subj}'")
+                            return True
         except Exception:
             pass
-        time.sleep(15)
+        time.sleep(8)
     return False
 
 def execute_dynamic_application(job_row, page):
@@ -83,12 +106,18 @@ def execute_dynamic_application(job_row, page):
 
     # 3. COUNTRY CODE & PHONE
     phone = answers.get("phone", "")
-    if phone and page.locator("input[id='phone']").count() > 0:
+    if phone and page.locator("input[id='phone'], input[type='tel']").count() > 0:
         print("  📞 Selecting Country Code and filling phone...")
-        if page.locator(".iti__selected-flag").count() > 0:
-            page.locator(".iti__selected-flag").click()
-            page.locator("li[data-country-code='us']").click()
-        page.locator("input[id='phone']").fill(phone)
+        try:
+            country_control = page.locator("div.phone-input__country div.select__control, div#react-select-country-placeholder, input#country").first
+            if country_control.count() > 0:
+                country_control.click()
+                page.keyboard.type("United States")
+                page.keyboard.press("Enter")
+                page.wait_for_timeout(500)
+        except Exception:
+            pass
+        page.locator("input[id='phone'], input[type='tel']").first.fill(phone)
 
     # 4. SECURE RESUME UPLOAD
     print("  📄 Uploading Resume to Greenhouse (10s wait)...")
@@ -123,19 +152,31 @@ def run_production_worker():
     print("🚀 Worker started. Continuously listening for APPROVED jobs...")
     while True:
         try:
-            res = supabase.table("job_queue").select("*").eq("status", "APPROVED").order("created_at", desc=False).limit(1).execute()
-            jobs = res.data
-            if not jobs:
+            # 1. Try atomic RPC claim first (FOR UPDATE SKIP LOCKED)
+            job = None
+            try:
+                rpc_res = supabase.rpc("claim_next_approved_job", {"worker_id": "railway_muscle_worker"}).execute()
+                if rpc_res.data and len(rpc_res.data) > 0:
+                    job = rpc_res.data[0]
+            except Exception:
+                pass
+
+            # Fallback to direct claim if RPC is not yet created
+            if not job:
+                res = supabase.table("job_queue").select("*").eq("status", "APPROVED").order("created_at", desc=False).limit(1).execute()
+                if res.data:
+                    job = res.data[0]
+                    supabase.table("job_queue").update({"status": "CLAIMED"}).eq("id", job["id"]).execute()
+
+            if not job:
                 time.sleep(10)
                 continue
                 
-            job = jobs[0]
             job_id = job["id"]
             job_url = job["url"]
             company_name = job_url.split("job-boards.greenhouse.io/")[1].split("/")[0] if "greenhouse.io" in job_url else "Company"
             
             print(f"\n⚡ Claimed job {job_id} for {company_name} ({job_url})")
-            supabase.table("job_queue").update({"status": "CLAIMED"}).eq("id", job_id).execute()
 
             # Resolve shortlink if needed
             final_job_url = job_url
