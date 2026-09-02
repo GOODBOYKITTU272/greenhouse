@@ -2,8 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 import { Briefcase, CheckCircle, AlertCircle, Clock, X, DollarSign } from 'lucide-react';
 
-const targetClients = ['AWL-27321', 'AWL-32692', 'AWL-31835', 'AWL-28569', 'AWL-31072', 'AWL-29927'];
-
 export default function App() {
   const [allJobs, setAllJobs] = useState([]);
   const [stats, setStats] = useState({ pending: 0, needsReview: 0, approved: 0, completed: 0, failed: 0, total: 0 });
@@ -27,7 +25,6 @@ export default function App() {
       const { data, error } = await supabase
         .from('job_queue')
         .select('*')
-        .in('applywizz_id', targetClients)
         .order('created_at', { ascending: false });
         
       if (error) throw error;
