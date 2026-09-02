@@ -30,16 +30,16 @@ logging.basicConfig(
 )
 log = logging.getLogger("MUSCLE")
 
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://lnlvxsskkxeidlqgqqrj.supabase.co")
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxubHZ4c3Nra3hlaWRscWdxcXJqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzkzOTE2NSwiZXhwIjoyMTAzNTE1MTY1fQ.trCeN-N7Ufz5L8nkLaWzUaaEhR74GBqiyBI6J59jYLo")
 WORKER_ID = os.environ.get("RAILWAY_REPLICA_ID") or os.environ.get("HOSTNAME") or "local-muscle-worker"
 SCREENSHOT_DIR = os.environ.get("SCREENSHOT_DIR", "screenshots")
 
 # ── DataImpulse Residential Proxy Config ──
 PROXY_CONFIG = json.loads(os.environ["PROXY_CONFIG"]) if os.environ.get("PROXY_CONFIG") else {
-    "server": os.environ["PROXY_SERVER"],
-    "username": os.environ["PROXY_USERNAME"],
-    "password": os.environ["PROXY_PASSWORD"],
+    "server": os.environ.get("PROXY_SERVER", "http://gw.dataimpulse.com:823"),
+    "username": os.environ.get("PROXY_USERNAME", "7dfdbfd6f547946ba484"),
+    "password": os.environ.get("PROXY_PASSWORD", "64b2edaac0ebaf3e"),
 }
 
 # ── Zoho Mail Reader API ──
