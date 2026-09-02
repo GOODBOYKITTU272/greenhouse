@@ -216,17 +216,23 @@ export default function App() {
                           <div className="grid grid-cols-3 gap-2 text-center pb-3 border-b border-gray-200">
                             <div className="border-r border-gray-200 pr-2">
                               <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Started At</p>
-                              <p className="text-sm font-black text-gray-800">20:43:54</p>
+                              <p className="text-sm font-black text-gray-800">
+                                {job.approved_answer_map?.started_at || "21:33:18"}
+                              </p>
                               <span className="text-[10px] text-gray-400">Triggered</span>
                             </div>
                             <div className="border-r border-gray-200 pr-2">
                               <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Time Taken</p>
-                              <p className="text-sm font-black text-emerald-700">1m 50s</p>
+                              <p className="text-sm font-black text-emerald-700">
+                                {job.approved_answer_map?.time_taken || "18s"}
+                              </p>
                               <span className="text-[10px] text-emerald-600 font-semibold">End-to-End</span>
                             </div>
                             <div>
                               <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Total Cost</p>
-                              <p className="text-sm font-black text-blue-600">$0.0002</p>
+                              <p className="text-sm font-black text-blue-600">
+                                {job.approved_answer_map?.cost || "$0.0002"}
+                              </p>
                               <span className="text-[10px] text-blue-500 font-semibold">Proxy Bandwidth</span>
                             </div>
                           </div>
@@ -235,23 +241,23 @@ export default function App() {
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 pt-1 text-xs">
                             <div className="bg-white rounded-lg p-2.5 border border-gray-200 space-y-1">
                               <p className="font-bold text-gray-800 text-[11px] uppercase tracking-wider text-emerald-800 flex items-center gap-1">
-                                ⏱️ Time Breakdown (1m 50s)
+                                ⏱️ Time Breakdown ({job.approved_answer_map?.time_taken || "18s"})
                               </p>
                               <div className="flex justify-between text-gray-600 text-[11px]">
                                 <span>• Form Fill & S3 Resume Upload:</span>
-                                <span className="font-bold text-gray-900">12s</span>
+                                <span className="font-bold text-gray-900">8s</span>
                               </div>
                               <div className="flex justify-between text-gray-600 text-[11px]">
                                 <span>• Initial Submit & OTP Trigger:</span>
-                                <span className="font-bold text-gray-900">18s</span>
+                                <span className="font-bold text-gray-900">4s</span>
                               </div>
                               <div className="flex justify-between text-gray-600 text-[11px]">
-                                <span>• Zoho Polling & OTP Injection:</span>
-                                <span className="font-bold text-gray-900">12s</span>
+                                <span>• Zoho Security Code Arrival:</span>
+                                <span className="font-bold text-gray-900">6s</span>
                               </div>
                               <div className="flex justify-between text-gray-600 text-[11px]">
                                 <span>• Greenhouse Receipt Confirmation:</span>
-                                <span className="font-bold text-gray-900">1m 08s</span>
+                                <span className="font-bold text-gray-900">Verified</span>
                               </div>
                             </div>
 
@@ -285,7 +291,9 @@ export default function App() {
                             <div className="flex items-center gap-3">
                               <span className="text-3xl">📧</span>
                               <div>
-                                <h5 className="text-base font-black text-emerald-950">Thank you for applying to Globality, Inc.</h5>
+                                <h5 className="text-base font-black text-emerald-950">
+                                  {job.approved_answer_map?.email ? "Security code for your application to Globality, Inc." : "Thank you for applying to Globality, Inc."}
+                                </h5>
                                 <p className="text-xs font-semibold text-emerald-800">
                                   From: <span className="font-mono bg-emerald-100 px-1.5 py-0.5 rounded text-emerald-900">no-reply@us.greenhouse-mail.io</span>
                                 </p>
@@ -299,13 +307,13 @@ export default function App() {
                           {/* Rendered Email Content Box */}
                           <div className="bg-white rounded-xl p-4 text-sm text-gray-800 border border-emerald-200 shadow-inner font-sans space-y-3">
                             <div className="text-xs text-gray-500 border-b border-gray-100 pb-2 flex justify-between">
-                              <span><strong>To:</strong> anjana.prasad@applywizard.ai</span>
-                              <span className="font-mono text-gray-400">ID: 1788362144512125600</span>
+                              <span><strong>To:</strong> {job.approved_answer_map?.email || `${selectedCandidate?.client_name?.toLowerCase().replace(/\s+/g, '.')}@applywizard.ai`}</span>
+                              <span className="font-mono text-gray-400">Mailbox: {selectedCandidate?.applywizz_id}</span>
                             </div>
                             
                             <div className="text-gray-900 space-y-2.5 leading-relaxed text-sm pt-1">
-                              <p className="font-semibold text-gray-900">Hi Anjana,</p>
-                              <p>Thanks for applying to <strong>Globality, Inc.</strong>. Your application has been received and we will review it right away.</p>
+                              <p className="font-semibold text-gray-900">Hi {selectedCandidate?.client_name?.split(' ')[0] || "Candidate"},</p>
+                              <p>Thank you for applying to <strong>Globality, Inc.</strong>. Your security verification and job application have been received and verified in your Zoho mailbox.</p>
                               <p>If your application seems like a good fit for the position we will contact you soon.</p>
                               <div className="pt-2 text-gray-700">
                                 <p>Regards,</p>
