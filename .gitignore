@@ -5,3 +5,9 @@ __pycache__/
 *.csv
 .gemini/
 dashboard/node_modules/
+
+.env
+.env.*
+!.env.example
+screenshots/
+proxies.txt
