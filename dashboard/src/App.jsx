@@ -249,12 +249,12 @@ export default function App() {
 
                           <div className="flex justify-end pt-1">
                             <a 
-                              href="https://zoho-mail-reader.onrender.com/api/zoho/ui/inbox?email=anjana.prasad@applywizard.ai&limit=5" 
+                              href="https://zoho-mail-reader.onrender.com" 
                               target="_blank" 
                               rel="noopener noreferrer"
                               className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold px-3.5 py-2 rounded-lg shadow transition-all flex items-center gap-1.5"
                             >
-                              <span>View Live Zoho Mail Inbox JSON</span>
+                              <span>View Live Zoho Mailbox UI</span>
                               <span>↗</span>
                             </a>
                           </div>
