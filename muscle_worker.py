@@ -137,14 +137,24 @@ def run_production_worker():
             print(f"\n⚡ Claimed job {job_id} for {company_name} ({job_url})")
             supabase.table("job_queue").update({"status": "CLAIMED"}).eq("id", job_id).execute()
 
+            # Resolve shortlink if needed
+            final_job_url = job_url
+            if "grnh.se" in job_url:
+                try:
+                    r_head = requests.head(job_url, allow_redirects=True, timeout=10)
+                    final_job_url = r_head.url
+                except Exception:
+                    pass
+
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True)
                 context = browser.new_context(proxy=PROXY, viewport={"width": 1280, "height": 900})
                 page = context.new_page()
                 
                 try:
-                    page.goto(job_url, timeout=60000)
-                    page.wait_for_load_state("networkidle")
+                    print(f"  🌐 Navigating to {final_job_url}...")
+                    page.goto(final_job_url, wait_until="domcontentloaded", timeout=90000)
+                    page.wait_for_timeout(3000)
                     supabase.table("job_queue").update({"status": "FILLING"}).eq("id", job_id).execute()
                     
                     # RUN DYNAMIC CORE
