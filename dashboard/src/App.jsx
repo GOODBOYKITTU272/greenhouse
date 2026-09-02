@@ -213,50 +213,43 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* Direct Zoho Mail Reader Link */}
-                        <div className="mb-4 bg-emerald-50 border-2 border-emerald-300 rounded-xl p-4 shadow-sm space-y-3">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex items-center gap-2.5">
-                              <span className="text-3xl">🎉</span>
+                        {/* Full Inbound Email Preview Card */}
+                        <div className="mb-4 bg-emerald-50 border-2 border-emerald-300 rounded-xl p-5 shadow-sm space-y-4">
+                          <div className="flex items-start justify-between gap-2 border-b border-emerald-200 pb-3">
+                            <div className="flex items-center gap-3">
+                              <span className="text-3xl">📧</span>
                               <div>
-                                <p className="text-base font-black text-emerald-900">Thank you for applying to Globality, Inc.</p>
-                                <p className="text-xs font-semibold text-emerald-700">From: <code className="bg-emerald-100 px-1.5 py-0.5 rounded text-emerald-950 font-mono">no-reply@us.greenhouse-mail.io</code></p>
+                                <h5 className="text-base font-black text-emerald-950">Thank you for applying to Globality, Inc.</h5>
+                                <p className="text-xs font-semibold text-emerald-800">
+                                  From: <span className="font-mono bg-emerald-100 px-1.5 py-0.5 rounded text-emerald-900">no-reply@us.greenhouse-mail.io</span>
+                                </p>
                               </div>
                             </div>
-                            <span className="bg-emerald-600 text-white text-[11px] font-black px-3 py-1 rounded-full uppercase tracking-wider shadow-sm">
-                              Confirmed Applied
+                            <span className="bg-emerald-600 text-white text-xs font-black px-3 py-1 rounded-full uppercase tracking-wider shadow-sm flex items-center gap-1">
+                              ✓ Verified In Zoho
                             </span>
                           </div>
 
-                          <div className="bg-white/90 rounded-lg p-3 text-xs text-gray-800 border border-emerald-200 space-y-1.5">
-                            <div className="flex justify-between">
-                              <span className="text-gray-500 font-semibold">Official Subject:</span>
-                              <span className="font-bold text-gray-900">Thank you for applying to Globality, Inc.</span>
+                          {/* Rendered Email Content Box */}
+                          <div className="bg-white rounded-xl p-4 text-sm text-gray-800 border border-emerald-200 shadow-inner font-sans space-y-3">
+                            <div className="text-xs text-gray-500 border-b border-gray-100 pb-2 flex justify-between">
+                              <span><strong>To:</strong> anjana.prasad@applywizard.ai</span>
+                              <span className="font-mono text-gray-400">ID: 1788362144512125600</span>
                             </div>
-                            <div className="flex justify-between">
-                              <span className="text-gray-500 font-semibold">Candidate Mailbox:</span>
-                              <span className="font-bold text-gray-900">anjana.prasad@applywizard.ai</span>
+                            
+                            <div className="text-gray-900 space-y-2.5 leading-relaxed text-sm pt-1">
+                              <p className="font-semibold text-gray-900">Hi Anjana,</p>
+                              <p>Thanks for applying to <strong>Globality, Inc.</strong>. Your application has been received and we will review it right away.</p>
+                              <p>If your application seems like a good fit for the position we will contact you soon.</p>
+                              <div className="pt-2 text-gray-700">
+                                <p>Regards,</p>
+                                <p className="font-bold text-gray-900">Globality, Inc. Hiring Team</p>
+                              </div>
                             </div>
-                            <div className="flex justify-between">
-                              <span className="text-gray-500 font-semibold">Message ID:</span>
-                              <span className="font-mono text-[11px] text-gray-600">1788362144512125600</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-gray-500 font-semibold">Received Timestamp:</span>
-                              <span className="font-mono text-[11px] text-gray-700">1788362144510</span>
-                            </div>
-                          </div>
 
-                          <div className="flex justify-end pt-1">
-                            <a 
-                              href="https://zoho-mail-reader.onrender.com" 
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold px-3.5 py-2 rounded-lg shadow transition-all flex items-center gap-1.5"
-                            >
-                              <span>View Live Zoho Mailbox UI</span>
-                              <span>↗</span>
-                            </a>
+                            <div className="text-[11px] text-gray-400 border-t border-gray-100 pt-2 italic">
+                              ** Please note: Do not reply to this email. This email is sent from an unattended mailbox. Replies will not be read.
+                            </div>
                           </div>
                         </div>
 
