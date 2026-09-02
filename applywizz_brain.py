@@ -17,6 +17,7 @@ import json
 import datetime
 import requests
 import time
+import urllib.parse
 
 try:
     import openai
@@ -85,11 +86,18 @@ class ApplyWizzBrain:
             r"boards\.greenhouse\.io/([^/]+)/jobs/(\d+)",
             r"job-boards\.greenhouse\.io/([^/]+)/jobs/(\d+)",
             r"for=([^&]+).*token=(\d+)",
-            r"https?://(?:www\.)?([^/]+)\.[a-z]+/.*gh_jid=(\d+)",
         ]:
             m = re.search(pattern, url)
             if m:
                 return m.group(1), m.group(2)
+
+        parsed = urllib.parse.urlparse(url)
+        qs = urllib.parse.parse_qs(parsed.query)
+        job_id = (qs.get("gh_jid") or [""])[0]
+        if job_id and job_id.isdigit():
+            host_parts = parsed.netloc.split(".")
+            board_token = host_parts[-2] if len(host_parts) >= 2 else host_parts[0]
+            return board_token, job_id
 
         raise ValueError(f"Cannot extract board_token/job_id from: {url}")
 

@@ -1,9 +1,8 @@
 #!/bin/bash
 set -e
 
-echo "🚀 Starting ApplyWizz Container Services..."
-echo "🧠 Launching Brain Worker (background)..."
+# Start Brain Worker in the background
 python3 -u brain_worker.py &
 
-echo "🦾 Launching Muscle Worker (foreground)..."
+# Start Muscle Worker in the foreground (keeps container alive)
 exec python3 -u muscle_worker.py
