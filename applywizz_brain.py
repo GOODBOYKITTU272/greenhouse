@@ -28,7 +28,10 @@ except ImportError:
 # CONSTANTS
 # ─────────────────────────────────────────────
 
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+# Required — an empty-string default here means the OpenAI SDK client fails
+# with a confusing error several calls later instead of failing loudly and
+# immediately, same reasoning as the Supabase/proxy vars in muscle_worker.py.
+OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
 OPENROUTER_MODEL = "inclusionai/ling-3.0-flash-fin:free"
 
 # Questions the AI Router is BANNED from answering.
