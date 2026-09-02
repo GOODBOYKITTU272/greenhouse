@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import time
+from datetime import datetime, timezone
 import requests
 from typing import Optional
 from playwright.sync_api import sync_playwright
@@ -39,11 +40,16 @@ WORKER_ID = os.environ.get("RAILWAY_REPLICA_ID") or os.environ.get("HOSTNAME") o
 SCREENSHOT_DIR = os.environ.get("SCREENSHOT_DIR", "screenshots")
 
 # ── DataImpulse Residential Proxy Config ──
-PROXY_CONFIG = json.loads(os.environ["PROXY_CONFIG"]) if os.environ.get("PROXY_CONFIG") else {
-    "server": os.environ.get("PROXY_SERVER", "http://gw.dataimpulse.com:823"),
-    "username": os.environ.get("PROXY_USERNAME", "7dfdbfd6f547946ba484"),
-    "password": os.environ.get("PROXY_PASSWORD", "64b2edaac0ebaf3e"),
-}
+# No hardcoded fallback credentials here either — same reasoning as the
+# Supabase key above. Must come from the environment.
+if os.environ.get("PROXY_CONFIG"):
+    PROXY_CONFIG = json.loads(os.environ["PROXY_CONFIG"])
+else:
+    PROXY_CONFIG = {
+        "server": os.environ["PROXY_SERVER"],
+        "username": os.environ["PROXY_USERNAME"],
+        "password": os.environ["PROXY_PASSWORD"],
+    }
 
 # ── Zoho Mail Reader API ──
 ZOHO_READER_BASE = os.environ.get("ZOHO_BASE_URL", "https://zoho-mail-reader.onrender.com").rstrip("/")
@@ -96,7 +102,7 @@ def get_otp_from_zoho(candidate_email: str, company_name: str, after_ts_ms: int)
                 data = resp.json()
                 code = data.get("code") or data.get("otp") or data.get("security_code")
                 if code:
-                    log.info(f"🔑 OTP found: {code}")
+                    log.info("🔑 OTP received.")  # never log the actual code
                     return str(code)
             log.info("   OTP not yet available, waiting 5s...")
             time.sleep(5)
@@ -324,13 +330,6 @@ def process_job(job):
             page.wait_for_timeout(2000)  # React mount delay
 
 
-            # Click all checkboxes (like consent forms)
-            try:
-                boxes = page.locator("input[type='checkbox']").all()
-                for box in boxes:
-                    box.check(force=True)
-            except: pass
-
             select_us_country_code(page)
 
             # ── Step 2: Upload Resume ──
@@ -438,6 +437,8 @@ def process_job(job):
             # URL changes OR the application form disappears completely, plus known text.
             final_path = os.path.join(SCREENSHOT_DIR, f"final_job_{job_id}.png")
             page.screenshot(path=final_path, full_page=True)
+            confirmation_url = page.url
+            confirmation_text = page_text[:1000]
 
             is_success = False
             is_validation_error = False
@@ -451,11 +452,27 @@ def process_job(job):
                 if page.locator(".field-with-errors").count() > 0 or "is required" in page_text or "invalid" in page_text:
                     is_validation_error = True
 
+            # Capture proof and free the browser slot immediately — the Zoho
+            # confirmation poll below can take up to 10 minutes, and there's no
+            # reason to hold a headless Chromium instance open for that; every
+            # extra minute a worker sits idle is a job another candidate is
+            # waiting behind.
+            browser.close()
+
+            proof = {
+                "confirmation_url": confirmation_url,
+                "confirmation_text": confirmation_text,
+                "final_screenshot_path": final_path,
+                "submitted_at": datetime.now(timezone.utc).isoformat(),
+            }
+            app_data["proof"] = proof
+
             if is_success:
                 log.info("✅ Browser submission completed. Waiting for Zoho confirmation email...")
                 supabase.table("job_queue").update({
                     "status": "SUBMITTED_EMAIL_PENDING",
-                    "error_message": None
+                    "error_message": None,
+                    "application_data": app_data,
                 }).eq("id", job_id).execute()
                 if candidate_email and confirmation_email_received(candidate_email, company_name, submit_start_ts):
                     elapsed_seconds = int(time.time() - submit_start_ts / 1000)
@@ -463,6 +480,7 @@ def process_job(job):
                     supabase.table("job_queue").update({
                         "status": "VERIFIED_APPLIED",
                         "error_message": None,
+                        "application_data": app_data,
                         # Real per-job telemetry only — this must never be filled with
                         # placeholder/templated values (that's what misled the dashboard before).
                         "approved_answer_map": {
@@ -477,12 +495,23 @@ def process_job(job):
                 log.info(f"📊 Final Score — Filled: {len(filled)} | Failed: {len(failed)} | Skipped: {len(skipped)}")
             elif is_validation_error or page.locator("button:has-text('Submit Application')").count() > 0:
                 log.error("❌ Form still showing or validation errors present after submit!")
-                raise Exception("VALIDATION_ERROR: Form was not submitted. Check screenshot.")
+                supabase.table("job_queue").update({
+                    "status": "VALIDATION_FAILED",
+                    "error_message": "Form was not submitted; validation errors present. Check screenshot.",
+                    "application_data": app_data,
+                }).eq("id", job_id).execute()
             else:
-                log.error("❌ Unknown post-submit state. Assuming failure to be safe.")
-                raise Exception("SUBMISSION_UNKNOWN: Did not detect confirmation evidence.")
-
-            browser.close()
+                # Clicked submit, but nothing on the page confirms it went through
+                # and nothing indicates a validation error either — an honest
+                # "we don't know" status distinct from ERROR, per the no-unproven-
+                # success rule: never claim VERIFIED_APPLIED or SUBMITTED_EMAIL_PENDING
+                # without actual evidence.
+                log.error("❌ Unknown post-submit state — no confirmation evidence found.")
+                supabase.table("job_queue").update({
+                    "status": "SUBMISSION_UNKNOWN",
+                    "error_message": "Clicked submit but found no confirmation evidence on the resulting page.",
+                    "application_data": app_data,
+                }).eq("id", job_id).execute()
 
         except Exception as e:
             log.error(f"💥 Critical error processing job [{job_id}]: {e}")

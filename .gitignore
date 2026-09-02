@@ -1,13 +1,24 @@
 venv/
+.venv/
 __pycache__/
 *.log
 .DS_Store
 *.csv
 .gemini/
+node_modules/
 dashboard/node_modules/
 
 .env
 .env.*
+*.env
 !.env.example
+
 screenshots/
+debug/
+tmp/
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.pdf
 proxies.txt
