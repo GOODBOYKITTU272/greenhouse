@@ -265,9 +265,16 @@ def smart_fill_field(page, label: str, answer: str, filled: list, failed: list):
                         if (!sel.id) sel.id = "custom_id_" + Math.random().toString(36).substr(2, 9);
                         found.push('SELECT:[id="' + sel.id + '"]');
                     }}
+                    // Consent/acknowledgement checkboxes — the question label IS often
+                    // the consent text itself (e.g. "I agree", "by checking this box...").
+                    let checkbox = container.querySelector("input[type='checkbox']");
+                    if(checkbox && radios.length === 0) {{
+                        if (!checkbox.id) checkbox.id = "custom_id_" + Math.random().toString(36).substr(2, 9);
+                        found.push('CHECKBOX:[id="' + checkbox.id + '"]');
+                    }}
                     // Normal text inputs
                     let inp = container.querySelector("input[type='text'], input:not([type]), input[type='tel'], input[type='email']");
-                    if(inp && !combo && radios.length === 0) {{
+                    if(inp && !combo && !checkbox && radios.length === 0) {{
                         if (!inp.id) inp.id = "custom_id_" + Math.random().toString(36).substr(2, 9);
                         found.push('INPUT:[id="' + inp.id + '"]');
                     }}
@@ -303,6 +310,26 @@ def smart_fill_field(page, label: str, answer: str, filled: list, failed: list):
                         log.info(f"   ✅ [NATIVE SELECT, wording variant] {label_clean} → '{answer}' matched to real option '{match}'")
                         return
                     log.warning(f"   ⚠️ No safe option match for '{label_clean}' → '{answer}' among real options: {real_option_texts}")
+            elif selector.startswith("CHECKBOX:"):
+                # Only ever check a box when the brain resolved and a human
+                # approved an affirmative answer for THIS specific question —
+                # never blindly (that blind-check-everything behavior was
+                # removed earlier for exactly this reason). Confirmed at real
+                # volume: ~1 in 4 real Greenhouse jobs has a required consent
+                # checkbox like this (data-processing consent, "I agree",
+                # AI-use acknowledgement) that was previously invisible to
+                # this function entirely.
+                answer_norm = answer.strip().lower()
+                affirmative = answer_norm in (
+                    "yes", "true", "checked", "agree", "i agree", "acknowledge",
+                    "acknowledged", "confirm", "confirmed", "i consent", "consent", "accept",
+                )
+                if affirmative:
+                    page.locator(selector.replace("CHECKBOX:", "")).check(force=True)
+                    filled.append(label_clean)
+                    log.info(f"   ✅ [CHECKBOX] {label_clean} → checked")
+                    return
+                log.warning(f"   ⚠️ Checkbox found for '{label_clean}' but answer '{answer}' isn't a recognized affirmative — leaving unchecked rather than guessing.")
             elif selector.startswith("INPUT:"):
                 page.locator(selector.replace("INPUT:", "")).fill(answer)
                 filled.append(label_clean)
