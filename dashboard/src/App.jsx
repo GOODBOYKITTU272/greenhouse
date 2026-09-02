@@ -212,18 +212,70 @@ export default function App() {
                         </div>
 
                         {/* Top Execution Metrics: Start Time, Duration & Cost */}
-                        <div className="grid grid-cols-3 gap-2 mb-4 bg-gray-50 border border-gray-200 rounded-xl p-3 text-center">
-                          <div className="border-r border-gray-200 pr-2">
-                            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Started At</p>
-                            <p className="text-xs font-black text-gray-800">20:43:54</p>
+                        <div className="mb-4 bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-3">
+                          <div className="grid grid-cols-3 gap-2 text-center pb-3 border-b border-gray-200">
+                            <div className="border-r border-gray-200 pr-2">
+                              <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Started At</p>
+                              <p className="text-sm font-black text-gray-800">20:43:54</p>
+                              <span className="text-[10px] text-gray-400">Triggered</span>
+                            </div>
+                            <div className="border-r border-gray-200 pr-2">
+                              <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Time Taken</p>
+                              <p className="text-sm font-black text-emerald-700">1m 50s</p>
+                              <span className="text-[10px] text-emerald-600 font-semibold">End-to-End</span>
+                            </div>
+                            <div>
+                              <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Total Cost</p>
+                              <p className="text-sm font-black text-blue-600">$0.0002</p>
+                              <span className="text-[10px] text-blue-500 font-semibold">Proxy Bandwidth</span>
+                            </div>
                           </div>
-                          <div className="border-r border-gray-200 pr-2">
-                            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Time Taken</p>
-                            <p className="text-xs font-black text-emerald-700">1m 50s</p>
-                          </div>
-                          <div>
-                            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Total Cost</p>
-                            <p className="text-xs font-black text-blue-600">$0.0002</p>
+
+                          {/* Detailed End-to-End Resource & Step Breakdown */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 pt-1 text-xs">
+                            <div className="bg-white rounded-lg p-2.5 border border-gray-200 space-y-1">
+                              <p className="font-bold text-gray-800 text-[11px] uppercase tracking-wider text-emerald-800 flex items-center gap-1">
+                                ⏱️ Time Breakdown (1m 50s)
+                              </p>
+                              <div className="flex justify-between text-gray-600 text-[11px]">
+                                <span>• Form Fill & S3 Resume Upload:</span>
+                                <span className="font-bold text-gray-900">12s</span>
+                              </div>
+                              <div className="flex justify-between text-gray-600 text-[11px]">
+                                <span>• Initial Submit & OTP Trigger:</span>
+                                <span className="font-bold text-gray-900">18s</span>
+                              </div>
+                              <div className="flex justify-between text-gray-600 text-[11px]">
+                                <span>• Zoho Polling & OTP Injection:</span>
+                                <span className="font-bold text-gray-900">12s</span>
+                              </div>
+                              <div className="flex justify-between text-gray-600 text-[11px]">
+                                <span>• Greenhouse Receipt Confirmation:</span>
+                                <span className="font-bold text-gray-900">1m 08s</span>
+                              </div>
+                            </div>
+
+                            <div className="bg-white rounded-lg p-2.5 border border-gray-200 space-y-1">
+                              <p className="font-bold text-gray-800 text-[11px] uppercase tracking-wider text-blue-800 flex items-center gap-1">
+                                💰 Cost & Services Breakdown
+                              </p>
+                              <div className="flex justify-between text-gray-600 text-[11px]">
+                                <span>• DataImpulse Proxy (~1.5 MB):</span>
+                                <span className="font-bold text-emerald-700">$0.0002</span>
+                              </div>
+                              <div className="flex justify-between text-gray-600 text-[11px]">
+                                <span>• Playwright Headless Worker:</span>
+                                <span className="font-bold text-gray-900">$0.00 (Self-Hosted)</span>
+                              </div>
+                              <div className="flex justify-between text-gray-600 text-[11px]">
+                                <span>• Zoho Mail Reader API:</span>
+                                <span className="font-bold text-gray-900">$0.00 (Internal)</span>
+                              </div>
+                              <div className="flex justify-between text-gray-600 text-[11px]">
+                                <span>• LLM / AI Tokens:</span>
+                                <span className="font-bold text-gray-900">$0.00 (Deterministic)</span>
+                              </div>
+                            </div>
                           </div>
                         </div>
 
