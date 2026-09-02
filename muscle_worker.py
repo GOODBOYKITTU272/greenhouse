@@ -104,7 +104,7 @@ def execute_dynamic_application(job_row, page):
         page.locator("input[id='last_name']").fill(answers.get("last_name", ""))
         page.locator("input[id='email']").fill(target_email)
 
-    # 3. COUNTRY CODE & PHONE
+    # 3. COUNTRY CODE, PHONE & LOCATION
     phone = answers.get("phone", "")
     if phone and page.locator("input[id='phone'], input[type='tel']").count() > 0:
         print("  📞 Selecting Country Code and filling phone...")
@@ -118,6 +118,20 @@ def execute_dynamic_application(job_row, page):
         except Exception:
             pass
         page.locator("input[id='phone'], input[type='tel']").first.fill(phone)
+
+    # Location (City)
+    loc_input = page.locator("input#candidate-location, input#job_application_location").first
+    if loc_input.count() > 0:
+        print("  📍 Selecting Location (City)...")
+        try:
+            loc_val = answers.get("location") or "New York, NY"
+            loc_input.fill(loc_val)
+            page.wait_for_timeout(1000)
+            page.keyboard.press("ArrowDown")
+            page.keyboard.press("Enter")
+            page.wait_for_timeout(500)
+        except Exception:
+            pass
 
     # 4. SECURE RESUME UPLOAD
     print("  📄 Uploading Resume to Greenhouse (10s wait)...")
