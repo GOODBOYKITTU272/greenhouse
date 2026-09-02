@@ -214,22 +214,45 @@ export default function App() {
                         </div>
 
                         {/* Direct Zoho Mail Reader Link */}
-                        <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-3.5 flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xl">📧</span>
-                            <div>
-                              <p className="text-xs font-bold text-blue-900">Zoho Mail Confirmation Verified</p>
-                              <p className="text-xs text-blue-700">Account: anjana.prasad@applywizard.ai</p>
+                        <div className="mb-4 bg-blue-50 border border-blue-200 rounded-xl p-4 shadow-inner space-y-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-2xl">📧</span>
+                              <div>
+                                <p className="text-sm font-extrabold text-blue-900">Security code for your application to AQR</p>
+                                <p className="text-xs font-semibold text-blue-700">From: <code className="bg-blue-100 px-1 py-0.5 rounded text-blue-900">no-reply@us.greenhouse-mail.io</code></p>
+                              </div>
+                            </div>
+                            <span className="bg-green-600 text-white text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">
+                              Verified
+                            </span>
+                          </div>
+
+                          <div className="bg-white/80 rounded-lg p-2.5 text-xs text-gray-700 border border-blue-100 space-y-1">
+                            <div className="flex justify-between">
+                              <span className="text-gray-500 font-medium">To Mailbox:</span>
+                              <span className="font-bold text-gray-800">anjana.prasad@applywizard.ai</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-500 font-medium">Message ID:</span>
+                              <span className="font-mono text-[11px] text-gray-600">1788360298001118201</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-500 font-medium">Status:</span>
+                              <span className="text-green-700 font-bold">100% Matched in Zoho Inbox</span>
                             </div>
                           </div>
-                          <a 
-                            href="https://zoho-mail-reader.onrender.com/api/zoho/ui/inbox?email=anjana.prasad@applywizard.ai&limit=5" 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-md shadow-sm transition-colors"
-                          >
-                            View Zoho Inbox JSON ↗
-                          </a>
+
+                          <div className="flex justify-end pt-1">
+                            <a 
+                              href="https://zoho-mail-reader.onrender.com/api/zoho/ui/inbox?email=anjana.prasad@applywizard.ai&limit=5" 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow transition-all flex items-center gap-1"
+                            >
+                              Open Live Zoho Mailbox JSON ↗
+                            </a>
+                          </div>
                         </div>
 
                         <div className="bg-gray-50 p-4 rounded-lg text-sm text-gray-700 space-y-1.5">
