@@ -360,6 +360,24 @@ def process_pending_jobs():
 
         logging.info(f"\n{'='*60}\nJob [{job_id}] | {client_name} | {applywizz_id}\nURL: {url}")
 
+        # Claim atomically before doing any real work. The plain SELECT above
+        # has no lock — if brain_worker ever runs as more than one replica
+        # (Railway shows 1 today, but muscle_worker.py is explicitly built
+        # for multiple), two replicas could both fetch this same row and
+        # both fully process it: duplicate CRM calls, duplicate Greenhouse
+        # fetches, duplicate real AI spend, for the same job. The WHERE
+        # status=<original status> guard is enforced by Postgres regardless
+        # of which replica's request arrives first; checking claim.data
+        # (not just assuming success) is what actually closes the race —
+        # a blind update-without-checking-the-result is the same gap that
+        # made muscle_worker.py's own single-worker fallback path unsafe.
+        claim = supabase.table("job_queue").update({"status": "PROCESSING"}).eq(
+            "id", job_id
+        ).eq("status", job["status"]).execute()
+        if not claim.data:
+            logging.info(f"  ⏭️ Job [{job_id}] already claimed by another worker — skipping.")
+            continue
+
         answer_map = None
         try:
             if not applywizz_id:
