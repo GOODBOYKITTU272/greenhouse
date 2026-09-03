@@ -54,11 +54,18 @@ CREATE TABLE IF NOT EXISTS job_schemas (
 -- One row per candidate. Cached once from the CRM (apply-wizz.me/api/get-client-details)
 -- by brain_worker.py's get_or_cache_candidate() so repeat lookups don't re-hit the CRM API.
 CREATE TABLE IF NOT EXISTS candidate_profiles (
-    applywizz_id   TEXT PRIMARY KEY,
-    profile_json   JSONB NOT NULL,   -- raw CRM response: {client: {...}, additional_information: {...}}
-    resume_text    TEXT,             -- extracted PDF text, used by the AI answer layer
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+    applywizz_id       TEXT PRIMARY KEY,
+    profile_json       JSONB NOT NULL,   -- raw CRM response: {client: {...}, additional_information: {...}}
+    resume_text        TEXT,             -- extracted PDF text, used by the AI answer layer
+    -- Kept in sync by sync_mailbox_status.py against ZOHO_MAIL_READER's real
+    -- connected-mailbox list (GET /api/zoho/mailboxes). Used by
+    -- claim_next_approved_job() to claim mailbox-connected candidates first —
+    -- a candidate with no connected mailbox can never reach a verified
+    -- status, so there's no reason to claim their job ahead of one who can.
+    mailbox_connected  BOOLEAN NOT NULL DEFAULT false,
+    mailbox_synced_at  TIMESTAMPTZ,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- ── ai_memory_bank ─────────────────────────────────────────────────────────

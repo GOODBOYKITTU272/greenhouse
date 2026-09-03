@@ -16,6 +16,11 @@ dashboard/node_modules/
 screenshots/
 debug/
 tmp/
+
+# Zoho debug dumps — contain real candidate mailbox content (PII), never commit these
+ZOHO_MAIL_READER/own-mail.json
+ZOHO_MAIL_READER/msgs.json
+ZOHO_MAIL_READER/folders.json
 *.png
 *.jpg
 *.jpeg
