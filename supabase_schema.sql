@@ -69,6 +69,12 @@ CREATE TABLE IF NOT EXISTS candidate_profiles (
     -- status, so there's no reason to claim their job ahead of one who can.
     mailbox_connected  BOOLEAN NOT NULL DEFAULT false,
     mailbox_synced_at  TIMESTAMPTZ,
+    -- AI-parsed {street, city, state, zip_code} from profile_json's
+    -- full_address, written once per candidate by parse_address_with_ai()
+    -- alongside the CRM fetch/refresh — replaces the old comma-splitting
+    -- heuristic in build_candidate_dict(), which could silently pick the
+    -- wrong piece as "city" for an address format it didn't expect.
+    parsed_address     JSONB,
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );

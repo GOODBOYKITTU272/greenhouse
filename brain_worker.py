@@ -11,12 +11,17 @@ import urllib.parse
 from datetime import datetime, timezone, timedelta
 
 from supabase import create_client, Client
-from applywizz_brain import ApplyWizzBrain
+from applywizz_brain import ApplyWizzBrain, OPENROUTER_API_KEY, OPENROUTER_MODEL
 
 try:
     from pypdf import PdfReader
 except ImportError:
     PdfReader = None
+
+try:
+    import openai
+except ImportError:
+    openai = None
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 
@@ -122,8 +127,28 @@ def parse_greenhouse_ids(url):
     return None, job_id
 
 
+def _get_with_backoff(url, timeout=20, max_retries=3):
+    """
+    GET with retry on 429 (rate-limited) — mirrors the same backoff pattern
+    applywizz_brain.py's AI router already uses (1s, 3s, 9s). Neither
+    fetch_greenhouse_job_data nor discover_board_token had this before —
+    at real volume, a burst of unique jobs hitting boards-api.greenhouse.io
+    with zero retry could turn a transient rate-limit into a wave of ERROR
+    jobs that a moment's wait would have avoided.
+    """
+    for attempt in range(max_retries):
+        resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=timeout)
+        if resp.status_code != 429:
+            return resp
+        if attempt < max_retries - 1:
+            wait = 3 ** attempt
+            logging.warning(f"  ⏳ Greenhouse rate-limited (429) — retrying in {wait}s...")
+            time.sleep(wait)
+    return resp  # last response, still 429 — caller's raise_for_status() surfaces it
+
+
 def discover_board_token(canonical, job_id):
-    resp = requests.get(canonical, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+    resp = _get_with_backoff(canonical, timeout=20)
     resp.raise_for_status()
     html = resp.text
     for pattern in [
@@ -144,11 +169,11 @@ def fetch_greenhouse_job_data(canonical):
         raise ValueError(f"Cannot parse board_token/job_id from: {canonical}")
 
     api_url = f"https://boards-api.greenhouse.io/v1/boards/{board_token}/jobs/{job_id}?questions=true"
-    resp = requests.get(api_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+    resp = _get_with_backoff(api_url, timeout=20)
     if resp.status_code == 404:
         board_token = discover_board_token(canonical, job_id)
         api_url = f"https://boards-api.greenhouse.io/v1/boards/{board_token}/jobs/{job_id}?questions=true"
-        resp = requests.get(api_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+        resp = _get_with_backoff(api_url, timeout=20)
     resp.raise_for_status()
     return board_token, job_id, resp.json()
 
@@ -213,7 +238,11 @@ def get_or_cache_candidate(supabase, applywizz_id):
         row = resp.data[0]
         if _is_profile_fresh(row.get("updated_at")):
             logging.info(f"CACHED profile for {applywizz_id} — no API call needed (refreshed within {CANDIDATE_PROFILE_REFRESH_HOURS}h)")
-            return {"profile_json": row["profile_json"], "resume_text": row.get("resume_text", "")}
+            return {
+                "profile_json": row["profile_json"],
+                "resume_text": row.get("resume_text", ""),
+                "parsed_address": row.get("parsed_address"),
+            }
         logging.info(f"Cached profile for {applywizz_id} is older than {CANDIDATE_PROFILE_REFRESH_HOURS}h — refreshing from CRM...")
     else:
         logging.info(f"First time: fetching {applywizz_id} from CRM API...")
@@ -232,10 +261,14 @@ def get_or_cache_candidate(supabase, applywizz_id):
     resume_url = profile_json.get("additional_information", {}).get("resume_url", "")
     resume_text  = extract_resume_text(resume_url)
 
+    full_address = profile_json.get("additional_information", {}).get("full_address", "")
+    parsed_address = parse_address_with_ai(full_address)
+
     supabase.table("candidate_profiles").upsert({
         "applywizz_id": applywizz_id,
         "profile_json": profile_json,
         "resume_text":  resume_text,
+        "parsed_address": parsed_address,
         # Upsert leaves columns you don't pass untouched on an UPDATE — the
         # table's DEFAULT now() only fires on INSERT, so this has to be set
         # explicitly every time or the freshness check above would never see
@@ -244,13 +277,79 @@ def get_or_cache_candidate(supabase, applywizz_id):
         "updated_at":   datetime.now(timezone.utc).isoformat(),
     }).execute()
     logging.info(f"Saved {applywizz_id} to candidate_profiles!")
-    return {"profile_json": profile_json, "resume_text": resume_text}
+    return {"profile_json": profile_json, "resume_text": resume_text, "parsed_address": parsed_address}
+
+# ─────────────────────────────────────────────
+# ADDRESS PARSER (AI) — replaces the old comma-splitting heuristic
+# ─────────────────────────────────────────────
+
+_address_ai_client = None
+
+
+def _get_address_ai_client():
+    global _address_ai_client
+    if _address_ai_client is None and openai:
+        _address_ai_client = openai.OpenAI(base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_API_KEY)
+    return _address_ai_client
+
+
+def parse_address_with_ai(full_address: str):
+    """
+    Ask the AI to split a raw CRM address string into street/city/state/zip.
+
+    Replaces the old heuristic in build_candidate_dict, which split on
+    commas and guessed which piece was the city based on where the state
+    name happened to appear (with an index-guessing fallback when that
+    didn't work) — silently wrong for any address format it didn't expect.
+    Called once per candidate, alongside the CRM fetch/refresh in
+    get_or_cache_candidate — never per-job, so a candidate applying to 50
+    jobs still only gets their address parsed once every 24h.
+
+    Returns None (never a guess) if there's no address, the AI call fails,
+    or the response isn't valid JSON with the expected shape — the caller
+    must fall back to something safe rather than trust a None as real data.
+    """
+    if not full_address or not full_address.strip():
+        return None
+    client = _get_address_ai_client()
+    if not client:
+        return None
+
+    prompt = (
+        "Extract the street address, city, US state (2-letter abbreviation), "
+        "and ZIP/postal code from the address below. Reply with ONLY a JSON "
+        'object and nothing else: {"street": "...", "city": "...", '
+        '"state": "...", "zip_code": "..."}. Use an empty string for any part '
+        "you cannot determine from the text. Never invent information that "
+        "isn't present in the address.\n\n"
+        f"Address: {full_address}"
+    )
+    try:
+        response = client.chat.completions.create(
+            model=OPENROUTER_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = response.choices[0].message.content.strip()
+        raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+        raw = re.sub(r"^```(?:json)?|```$", "", raw, flags=re.MULTILINE).strip()
+        parsed = json.loads(raw)
+        if not isinstance(parsed, dict):
+            return None
+        return {
+            "street":   str(parsed.get("street") or ""),
+            "city":     str(parsed.get("city") or ""),
+            "state":    str(parsed.get("state") or ""),
+            "zip_code": str(parsed.get("zip_code") or ""),
+        }
+    except Exception as e:
+        logging.warning(f"  Address AI parse failed for '{full_address[:60]}...' (falling back): {e}")
+        return None
 
 # ─────────────────────────────────────────────
 # CANDIDATE DICT BUILDER
 # ─────────────────────────────────────────────
 
-def build_candidate_dict(applywizz_id, profile_json):
+def build_candidate_dict(applywizz_id, profile_json, parsed_address=None):
     client   = profile_json.get("client", {})
     add_info = profile_json.get("additional_information", {})
 
@@ -259,21 +358,35 @@ def build_candidate_dict(applywizz_id, profile_json):
     first_name  = name_parts[0]
     last_name   = name_parts[1] if len(name_parts) > 1 else ""
 
-    full_address  = add_info.get("full_address", "")
-    address_parts = [p.strip() for p in full_address.split(",")] if full_address else []
-    street = address_parts[0] if address_parts else ""
-    zip_code = ""
-    for part in address_parts:
-        if part.strip().isdigit() and len(part.strip()) == 5:
-            zip_code = part.strip()
+    full_address = add_info.get("full_address", "")
     state = add_info.get("state_of_residence", "")
-    city  = ""
-    for i, part in enumerate(address_parts):
-        if state and state.lower() in part.lower() and i > 0:
-            city = address_parts[i - 1].strip()
-            break
-    if not city and len(address_parts) >= 3:
-        city = address_parts[-4].strip() if len(address_parts) >= 4 else address_parts[1].strip()
+
+    if parsed_address and parsed_address.get("city"):
+        # Real AI-parsed address (cached once per candidate) — reliable
+        # regardless of how the CRM's free-text address is formatted.
+        street   = parsed_address.get("street", "")
+        city     = parsed_address.get("city", "")
+        zip_code = parsed_address.get("zip_code", "")
+        state    = state or parsed_address.get("state", "")
+    else:
+        # Fallback only: no AI-parsed address cached yet (or parsing failed)
+        # for this candidate — same comma-splitting heuristic as before,
+        # kept only so a candidate is never left with a fully blank address
+        # while waiting for the next daily refresh to pick up parsed_address.
+        address_parts = [p.strip() for p in full_address.split(",")] if full_address else []
+        street = address_parts[0] if address_parts else ""
+        zip_code = ""
+        for part in address_parts:
+            if part.strip().isdigit() and len(part.strip()) == 5:
+                zip_code = part.strip()
+        city = ""
+        for i, part in enumerate(address_parts):
+            if state and state.lower() in part.lower() and i > 0:
+                city = address_parts[i - 1].strip()
+                break
+        if not city and len(address_parts) >= 3:
+            city = address_parts[-4].strip() if len(address_parts) >= 4 else address_parts[1].strip()
+
     if not zip_code and (city or state):
         zip_code = lookup_zip_code(street, city, state)
 
@@ -393,10 +506,11 @@ def process_pending_jobs():
             job_data = batch_schema_cache[canonical]
 
             # ── Step 2: Candidate profile ──
-            cached       = get_or_cache_candidate(supabase, applywizz_id)
-            profile_json = cached["profile_json"]
-            resume_text  = cached["resume_text"]
-            candidate    = build_candidate_dict(applywizz_id, profile_json)
+            cached         = get_or_cache_candidate(supabase, applywizz_id)
+            profile_json   = cached["profile_json"]
+            resume_text    = cached["resume_text"]
+            parsed_address = cached.get("parsed_address")
+            candidate      = build_candidate_dict(applywizz_id, profile_json, parsed_address)
 
             # ── Step 3: Memory Bank ──
             memory_resp = supabase.table("ai_memory_bank").select("question_label, answer").eq(
@@ -433,11 +547,14 @@ def process_pending_jobs():
 
         except Exception as e:
             logging.error(f"Error on Job [{job_id}]: {e}\n{traceback.format_exc()}")
-            supabase.table("job_queue").update({
-                "status": "ERROR",
-                "error_message": str(e),
-                "application_data": answer_map
-            }).eq("id", job_id).execute()
+            error_update = {"status": "ERROR", "error_message": str(e)}
+            # answer_map is only set once Step 4 actually runs — a failure in
+            # an earlier step (schema fetch, CRM fetch) must not overwrite any
+            # application_data this row already had (e.g. from a prior attempt
+            # someone manually reset from ERROR back to PENDING for a retry).
+            if answer_map is not None:
+                error_update["application_data"] = answer_map
+            supabase.table("job_queue").update(error_update).eq("id", job_id).execute()
 
         time.sleep(1)
 
