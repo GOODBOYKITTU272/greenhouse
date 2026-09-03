@@ -394,7 +394,14 @@ def build_candidate_dict(applywizz_id, profile_json, parsed_address=None):
         "applywizz_id":          applywizz_id,
         "first_name":            first_name,
         "last_name":             last_name,
-        "email":                 client.get("personal_email", ""),
+        # Must be the monitored applywizz.ai mailbox, never the candidate's
+        # personal email — muscle_worker.py's OTP and confirmation checks
+        # poll Zoho for whatever email actually got submitted on the form,
+        # and Zoho only has access to applywizz.ai inboxes. Submitting a
+        # personal email here means every future OTP/confirmation check for
+        # this job silently times out — no error, just a wait that can
+        # never succeed.
+        "email":                 client.get("company_email", ""),
         "phone":                 client.get("callable_phone", ""),
         "full_address":          full_address,
         "street_address":        street,
@@ -511,6 +518,20 @@ def process_pending_jobs():
             resume_text    = cached["resume_text"]
             parsed_address = cached.get("parsed_address")
             candidate      = build_candidate_dict(applywizz_id, profile_json, parsed_address)
+
+            # Hard business rule: never apply for a candidate with no
+            # monitored applywizz.ai mailbox on file. Without one, Zoho has
+            # nothing to read, so OTP/confirmation can never be verified —
+            # applying anyway would submit real applications no one can ever
+            # confirm went through. Fails into the same ERROR path/status
+            # every other Step 2/3 failure already uses, so this needs no
+            # new status and shows up in the dashboard exactly like any
+            # other failed job.
+            if not candidate["email"]:
+                raise Exception(
+                    f"No monitored applywizz.ai email on file for {applywizz_id} — "
+                    "refusing to apply since OTP/confirmation could never be verified."
+                )
 
             # ── Step 3: Memory Bank ──
             memory_resp = supabase.table("ai_memory_bank").select("question_label, answer").eq(
