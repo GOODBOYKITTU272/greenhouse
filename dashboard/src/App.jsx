@@ -373,14 +373,27 @@ export default function App() {
                           {Object.entries(sharedAnswers).map(([fieldName, q]) => (
                             <div key={fieldName} className="bg-white border border-blue-100 rounded-lg p-3">
                               <p className="text-sm font-bold text-gray-700 mb-2">Q: {q.label}</p>
-                              <input
-                                type="text"
-                                value={q.displayAns}
-                                onChange={(e) => handleSharedAnswerChange(fieldName, e.target.value)}
-                                className={activeTab === 'NEEDS_REVIEW' ? "w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500" : "w-full p-2 border-transparent bg-gray-50 rounded text-gray-700"}
-                                placeholder="Type answer here..."
-                                disabled={activeTab !== 'NEEDS_REVIEW'}
-                              />
+                              {(fieldName === 'resume' || fieldName === 'cover_letter') ? (
+                                // A signed S3 URL, not free text a human should hand-edit —
+                                // show it as an actual openable document link so a reviewer
+                                // can confirm it's the right file, not a raw URL in a text box.
+                                q.displayAns ? (
+                                  <a href={q.displayAns} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-blue-600 hover:underline font-semibold text-sm">
+                                    📄 {fieldName === 'resume' ? 'View Resume' : 'View Cover Letter'}
+                                  </a>
+                                ) : (
+                                  <p className="text-sm text-gray-400 italic">No {fieldName === 'resume' ? 'resume' : 'cover letter'} on file</p>
+                                )
+                              ) : (
+                                <input
+                                  type="text"
+                                  value={q.displayAns}
+                                  onChange={(e) => handleSharedAnswerChange(fieldName, e.target.value)}
+                                  className={activeTab === 'NEEDS_REVIEW' ? "w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500" : "w-full p-2 border-transparent bg-gray-50 rounded text-gray-700"}
+                                  placeholder="Type answer here..."
+                                  disabled={activeTab !== 'NEEDS_REVIEW'}
+                                />
+                              )}
                             </div>
                           ))}
                         </div>
