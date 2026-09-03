@@ -2,21 +2,34 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 import { Briefcase, CheckCircle, AlertCircle, Clock, X } from 'lucide-react';
 
+// Greenhouse's own standardized field_name values for genuinely candidate-level
+// fields — stable across every company's form, confirmed against applywizz_brain.py's
+// _layer1_basic_catch mapping. Safe to edit ONCE and apply to every one of a
+// candidate's pending jobs. Everything else (custom/free-text questions, and
+// demographic_question, whose wording+meaning both vary per company even when
+// they happen to look similar) stays edited per-job — see jobAnswers below.
+const SHARED_FIELD_NAMES = new Set([
+  'first_name', 'last_name', 'email', 'phone',
+  'resume', 'cover_letter', 'linkedin_profile', 'website',
+]);
+
 export default function App() {
   const [allJobs, setAllJobs] = useState([]);
   const [stats, setStats] = useState({ pending: 0, needsReview: 0, approved: 0, completed: 0, failed: 0, total: 0 });
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("NEEDS_REVIEW");
-  
+
   // Modal state
   const [selectedCandidate, setSelectedCandidate] = useState(null);
   const [candidateJobs, setCandidateJobs] = useState([]);
-  // Keyed by job.id -> { [label]: { ...question, displayAns } } — deliberately
-  // NOT merged across jobs. A candidate can have several pending jobs open at
-  // once, and two different jobs can share the exact same question wording
-  // (e.g. "Why do you want to work here?") while needing different honest
-  // answers. Editing per-job keeps a fix to one job's answer from silently
-  // bleeding into another job's answer for the same candidate.
+  // Structured, genuinely-candidate-level fields (name/email/phone/etc.) —
+  // one shared value edited once, applied to every job that has that field.
+  const [sharedAnswers, setSharedAnswers] = useState({});
+  // Everything else, keyed by job.id -> { [label]: { ...question, displayAns } }.
+  // NOT merged across jobs — two different jobs can share the exact same
+  // custom question wording (e.g. "Why do you want to work here?") while
+  // needing different honest answers, so editing one must never bleed into
+  // another job for the same candidate.
   const [jobAnswers, setJobAnswers] = useState({});
   const [approveStatus, setApproveStatus] = useState(null); // {done, total, failed: [{id,url,error}]}
 
@@ -70,22 +83,37 @@ export default function App() {
     setCandidateJobs(jobs);
     setSelectedCandidate({ applywizz_id: applywizzId, client_name: clientName });
 
-    // Per-job answer state — each job keeps its own copy of its questions,
-    // even when another of this candidate's jobs has a question with the
-    // exact same label text.
+    // Split each job's questions: genuinely candidate-level structured fields
+    // (name/email/phone/etc., identified by Greenhouse's own stable field_name,
+    // not by label text) go into one shared, edit-once bucket. Everything else
+    // stays scoped to its own job so a company-specific answer can never bleed
+    // into a different job just because the question wording matches.
+    const shared = {};
     const ja = {};
     jobs.forEach(job => {
       const perJob = {};
       if (job.application_data && job.application_data.answer_map) {
         job.application_data.answer_map.forEach(q => {
           const label = q.question_label || q.label;
-          perJob[label] = { ...q, displayAns: q.answer || '' };
+          if (SHARED_FIELD_NAMES.has(q.field_name)) {
+            if (!shared[q.field_name]) shared[q.field_name] = { ...q, label, displayAns: q.answer || '' };
+          } else {
+            perJob[label] = { ...q, displayAns: q.answer || '' };
+          }
         });
       }
       ja[job.id] = perJob;
     });
+    setSharedAnswers(shared);
     setJobAnswers(ja);
     setApproveStatus(null);
+  };
+
+  const handleSharedAnswerChange = (fieldName, newAns) => {
+    setSharedAnswers(prev => ({
+      ...prev,
+      [fieldName]: { ...prev[fieldName], displayAns: newAns }
+    }));
   };
 
   const handleAnswerChange = (jobId, label, newAns) => {
@@ -101,9 +129,14 @@ export default function App() {
     let done = 0;
     for (const job of candidateJobs) {
       try {
-        // Build this job's own updated answer_map from only its own edited
-        // answers — never from another job's jobAnswers entry.
+        // Build this job's own updated answer_map: shared structured fields
+        // (by field_name) apply the one candidate-level edit; everything else
+        // uses only this job's own jobAnswers entry — never another job's.
         const answerMap = (job.application_data?.answer_map || []).map(q => {
+          if (SHARED_FIELD_NAMES.has(q.field_name)) {
+            const sharedEdit = sharedAnswers[q.field_name];
+            return sharedEdit ? { ...q, answer: sharedEdit.displayAns } : q;
+          }
           const label = q.question_label || q.label;
           const edited = jobAnswers[job.id]?.[label];
           return edited ? { ...q, answer: edited.displayAns } : q;
@@ -333,6 +366,26 @@ export default function App() {
                   </div>
                 ) : (
                   <div className="space-y-6">
+                    {Object.keys(sharedAnswers).length > 0 && (
+                      <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+                        <p className="text-xs font-bold text-blue-800 uppercase tracking-wider mb-3">Candidate Info — one edit applies to all {candidateJobs.length} jobs</p>
+                        <div className="space-y-3">
+                          {Object.entries(sharedAnswers).map(([fieldName, q]) => (
+                            <div key={fieldName} className="bg-white border border-blue-100 rounded-lg p-3">
+                              <p className="text-sm font-bold text-gray-700 mb-2">Q: {q.label}</p>
+                              <input
+                                type="text"
+                                value={q.displayAns}
+                                onChange={(e) => handleSharedAnswerChange(fieldName, e.target.value)}
+                                className={activeTab === 'NEEDS_REVIEW' ? "w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500" : "w-full p-2 border-transparent bg-gray-50 rounded text-gray-700"}
+                                placeholder="Type answer here..."
+                                disabled={activeTab !== 'NEEDS_REVIEW'}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     {candidateJobs.map(job => (
                       <div key={job.id} className="bg-white border-2 border-gray-100 rounded-xl p-4 shadow-sm">
                         <a href={job.url} target="_blank" rel="noopener noreferrer" className="font-bold text-blue-600 hover:underline text-sm break-all block mb-3 pb-2 border-b border-gray-100">
