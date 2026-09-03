@@ -98,8 +98,13 @@ def normalize_job_url(url):
 
 def parse_greenhouse_ids(url):
     for pattern in [
-        r"boards\.greenhouse\.io/([^/]+)/jobs/(\d+)",
-        r"job-boards\.greenhouse\.io/([^/]+)/jobs/(\d+)",
+        # (?:\w+\.)? allows a region subdomain — e.g. boards.eu.greenhouse.io,
+        # job-boards.eu.greenhouse.io — which real jobs use (confirmed: NICE,
+        # ClinChoice, Datapao, and 9 others in a single 387-job batch) and
+        # which the bare "boards.greenhouse.io" match used to miss entirely,
+        # failing the job before it ever got a question schema.
+        r"boards\.(?:\w+\.)?greenhouse\.io/([^/]+)/jobs/(\d+)",
+        r"job-boards\.(?:\w+\.)?greenhouse\.io/([^/]+)/jobs/(\d+)",
         r"for=([^&]+).*token=(\d+)",
     ]:
         m = re.search(pattern, url)
@@ -124,7 +129,7 @@ def discover_board_token(canonical, job_id):
         r'"board_token"\s*:\s*"([^"]+)"',
         r"'board_token'\s*:\s*'([^']+)'",
         r'boards-api\.greenhouse\.io/v1/boards/([^/"?]+)/jobs/',
-        r'job-boards\.greenhouse\.io/([^/"?]+)/jobs/',
+        r'job-boards\.(?:\w+\.)?greenhouse\.io/([^/"?]+)/jobs/',
     ]:
         m = re.search(pattern, html)
         if m:
