@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
-import { Briefcase, CheckCircle, AlertCircle, Clock, X, DollarSign } from 'lucide-react';
+import { Briefcase, CheckCircle, AlertCircle, Clock, X } from 'lucide-react';
 
 export default function App() {
   const [allJobs, setAllJobs] = useState([]);
@@ -11,7 +11,14 @@ export default function App() {
   // Modal state
   const [selectedCandidate, setSelectedCandidate] = useState(null);
   const [candidateJobs, setCandidateJobs] = useState([]);
-  const [uniqueQuestions, setUniqueQuestions] = useState({});
+  // Keyed by job.id -> { [label]: { ...question, displayAns } } — deliberately
+  // NOT merged across jobs. A candidate can have several pending jobs open at
+  // once, and two different jobs can share the exact same question wording
+  // (e.g. "Why do you want to work here?") while needing different honest
+  // answers. Editing per-job keeps a fix to one job's answer from silently
+  // bleeding into another job's answer for the same candidate.
+  const [jobAnswers, setJobAnswers] = useState({});
+  const [approveStatus, setApproveStatus] = useState(null); // {done, total, failed: [{id,url,error}]}
 
   useEffect(() => {
     fetchData();
@@ -25,8 +32,13 @@ export default function App() {
       const { data, error } = await supabase
         .from('job_queue')
         .select('*')
-        .order('created_at', { ascending: false });
-        
+        .order('created_at', { ascending: false })
+        // Temporary safety cap — no real pagination exists yet. Fine while
+        // the queue is empty/small; once real daily volume flows in this
+        // needs actual server-side pagination or per-status filtering
+        // instead of raising the number.
+        .limit(2000);
+
       if (error) throw error;
       
       setAllJobs(data || []);
@@ -57,50 +69,70 @@ export default function App() {
     });
     setCandidateJobs(jobs);
     setSelectedCandidate({ applywizz_id: applywizzId, client_name: clientName });
-    
-    const uq = {};
+
+    // Per-job answer state — each job keeps its own copy of its questions,
+    // even when another of this candidate's jobs has a question with the
+    // exact same label text.
+    const ja = {};
     jobs.forEach(job => {
+      const perJob = {};
       if (job.application_data && job.application_data.answer_map) {
         job.application_data.answer_map.forEach(q => {
           const label = q.question_label || q.label;
-          if (!uq[label]) uq[label] = { ...q, displayAns: q.answer || '' };
+          perJob[label] = { ...q, displayAns: q.answer || '' };
         });
       }
+      ja[job.id] = perJob;
     });
-    setUniqueQuestions(uq);
+    setJobAnswers(ja);
+    setApproveStatus(null);
   };
 
-  const handleAnswerChange = (label, newAns) => {
-    setUniqueQuestions(prev => ({
+  const handleAnswerChange = (jobId, label, newAns) => {
+    setJobAnswers(prev => ({
       ...prev,
-      [label]: { ...prev[label], displayAns: newAns }
+      [jobId]: { ...prev[jobId], [label]: { ...prev[jobId][label], displayAns: newAns } }
     }));
   };
 
   const approveAll = async () => {
     if (!selectedCandidate) return;
-    try {
-      for (const job of candidateJobs) {
-        if (job.application_data && job.application_data.answer_map) {
-          job.application_data.answer_map.forEach(q => {
-            const label = q.question_label || q.label;
-            if (uniqueQuestions[label]) {
-              q.answer = uniqueQuestions[label].displayAns;
-            }
-          });
-        }
-        await supabase
+    const failed = [];
+    let done = 0;
+    for (const job of candidateJobs) {
+      try {
+        // Build this job's own updated answer_map from only its own edited
+        // answers — never from another job's jobAnswers entry.
+        const answerMap = (job.application_data?.answer_map || []).map(q => {
+          const label = q.question_label || q.label;
+          const edited = jobAnswers[job.id]?.[label];
+          return edited ? { ...q, answer: edited.displayAns } : q;
+        });
+        const application_data = { ...job.application_data, answer_map: answerMap };
+
+        const { error } = await supabase
           .from('job_queue')
-          .update({ 
+          .update({
             status: 'APPROVED',
-            application_data: job.application_data 
+            application_data,
           })
           .eq('id', job.id);
+
+        if (error) throw error;
+        done++;
+      } catch (err) {
+        console.error(`Failed to approve job [${job.id}] (${job.url}):`, err);
+        failed.push({ id: job.id, url: job.url, error: err.message || String(err) });
       }
+    }
+
+    setApproveStatus({ done, total: candidateJobs.length, failed });
+    fetchData();
+    // Only auto-close the modal on a clean sweep — if anything failed, keep
+    // it open with the failure list visible instead of silently dropping
+    // back to the table with no indication of what actually went through.
+    if (failed.length === 0) {
       setSelectedCandidate(null);
-      fetchData();
-    } catch (err) {
-      alert("Failed to approve jobs.");
     }
   };
 
@@ -300,24 +332,50 @@ export default function App() {
                     ))}
                   </div>
                 ) : (
-                  <div className="space-y-4">
-                    {Object.entries(uniqueQuestions).map(([label, q], idx) => (
-                      <div key={idx} className="bg-white border border-gray-100 rounded-lg p-4 shadow-sm hover:border-blue-100 transition-colors">
-                        <p className="text-sm font-bold text-gray-700 mb-2">Q: {label}</p>
-                        <input 
-                          type="text" 
-                          value={q.displayAns}
-                          onChange={(e) => handleAnswerChange(label, e.target.value)}
-                          className={activeTab === 'NEEDS_REVIEW' ? "w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500" : "w-full p-2 border-transparent bg-gray-50 rounded text-gray-700"}
-                          placeholder="Type answer here..."
-                          disabled={activeTab !== 'NEEDS_REVIEW'}
-                        />
+                  <div className="space-y-6">
+                    {candidateJobs.map(job => (
+                      <div key={job.id} className="bg-white border-2 border-gray-100 rounded-xl p-4 shadow-sm">
+                        <a href={job.url} target="_blank" rel="noopener noreferrer" className="font-bold text-blue-600 hover:underline text-sm break-all block mb-3 pb-2 border-b border-gray-100">
+                          {job.url}
+                        </a>
+                        <div className="space-y-3">
+                          {Object.entries(jobAnswers[job.id] || {}).map(([label, q], idx) => (
+                            <div key={idx} className="bg-gray-50 border border-gray-100 rounded-lg p-3">
+                              <p className="text-sm font-bold text-gray-700 mb-2">Q: {label}</p>
+                              <input
+                                type="text"
+                                value={q.displayAns}
+                                onChange={(e) => handleAnswerChange(job.id, label, e.target.value)}
+                                className={activeTab === 'NEEDS_REVIEW' ? "w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500" : "w-full p-2 border-transparent bg-white rounded text-gray-700"}
+                                placeholder="Type answer here..."
+                                disabled={activeTab !== 'NEEDS_REVIEW'}
+                              />
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     ))}
                   </div>
                 )}
+
+                {approveStatus && (
+                  <div className={`mt-4 rounded-xl p-4 text-sm font-semibold ${approveStatus.failed.length === 0 ? 'bg-green-50 border-2 border-green-300 text-green-800' : 'bg-red-50 border-2 border-red-300 text-red-800'}`}>
+                    {approveStatus.failed.length === 0 ? (
+                      <p>✓ All {approveStatus.total} jobs approved successfully.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        <p>⚠️ {approveStatus.done} of {approveStatus.total} jobs approved — {approveStatus.failed.length} failed and were NOT approved:</p>
+                        <ul className="list-disc list-inside space-y-1">
+                          {approveStatus.failed.map(f => (
+                            <li key={f.id} className="break-all">Job [{f.id}] {f.url} — {f.error}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-              
+
               {activeTab === 'NEEDS_REVIEW' && (
                 <div className="p-6 border-t border-gray-100 bg-gray-50 rounded-b-xl flex justify-end">
                   <button onClick={approveAll} className="bg-green-500 hover:bg-green-600 text-white px-8 py-3 rounded-xl font-bold text-lg shadow-sm flex items-center gap-2 transition-all transform hover:scale-105">
