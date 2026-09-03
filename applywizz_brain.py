@@ -163,6 +163,17 @@ class ApplyWizzBrain:
     # OPTION MATCHERS
     # ──────────────────────────────────────────
 
+    def _any_word(self, text, phrases):
+        """
+        Like `any(p in text for p in phrases)` but matches on whole-word/
+        phrase boundaries instead of raw substrings — e.g. "gender" must
+        NOT match inside "transgender". A plain substring test on
+        "gender" alone would (transgender contains it with no boundary in
+        between), which is exactly how a gender answer once landed on a
+        transgender question.
+        """
+        return any(re.search(r'\b' + re.escape(p) + r'\b', text) for p in phrases)
+
     def _match_option(self, options, intent):
         """
         Find the ATS option using the ATS Synonym Dictionary.
@@ -243,23 +254,35 @@ class ApplyWizzBrain:
                 status=STATUS_APPROVED if value else STATUS_NEEDS_ATTENTION,
             )
 
-        # 2. Try label fuzzy match (for obfuscated field names like question_1234)
+        # 2. Try label fuzzy match (for obfuscated field names like question_1234).
+        # A real field label states its subject right at the start, even
+        # when Greenhouse appends extra instructions after it — "Email",
+        # "Website/Portfolio (your application will not be considered
+        # without...)". Only look for the keyword in the first 40
+        # characters, not the whole label — a long compound/compliance-style
+        # label can contain one of these words buried far from the start:
+        # an SMS/WhatsApp consent question that happens to mention "...we
+        # will only communicate with you via email..." near its end was
+        # matching this shortcut on that buried word and getting answered
+        # with the candidate's email address instead of the actual Yes/No
+        # consent question.
         lbl = label.lower()
-        if "first name" in lbl:
+        head = lbl[:40]
+        if "first name" in head:
             key = "first_name"
-        elif "last name" in lbl:
+        elif "last name" in head:
             key = "last_name"
-        elif "email" in lbl:
+        elif "email" in head:
             key = "email"
-        elif "phone" in lbl:
+        elif "phone" in head:
             key = "phone"
-        elif "resume" in lbl or "cv" in lbl:
+        elif "resume" in head or "cv" in head:
             key = "resume"
-        elif "cover letter" in lbl:
+        elif "cover letter" in head:
             key = "cover_letter"
-        elif "linkedin" in lbl:
+        elif "linkedin" in head:
             key = "linkedin_profile"
-        elif "website" in lbl:
+        elif "website" in head:
             key = "website"
         else:
             return None
@@ -300,6 +323,19 @@ class ApplyWizzBrain:
             matched, _ = self._match_option(options, intent)
             return self._trace(matched, "candidate_profiles.require_sponsorship", "FUZZY_MATCHER", STATUS_APPROVED)
 
+        # ── ADDRESS QUESTION WITH A "TYPE 'RELOCATING'" ESCAPE HATCH ──
+        # e.g. "What is the address from which you plan on working? If you
+        # would need to relocate, please type 'relocating'." Checked before
+        # the plain Relocation branch below, which this label would
+        # otherwise also match on the word "relocat[e/ing]" — returning a
+        # bare "Yes"/"No" to what is actually a free-text address field.
+        # The real address answers the question honestly without having to
+        # guess relocation intent for this specific job, which we don't
+        # actually know.
+        if "address" in ll and "relocat" in ll:
+            val = cp.get("street_address") or cp.get("full_address", "")
+            return self._trace(val, "candidate_profiles.street_address", "FUZZY_MATCHER", STATUS_APPROVED if val else STATUS_NEEDS_ATTENTION)
+
         # ── Relocation ──
         if any(w in ll for w in ["relocate", "relocation", "willing to move"]):
             willing = cp.get("willing_to_relocate", True)
@@ -314,8 +350,27 @@ class ApplyWizzBrain:
             matched, _ = self._match_option(options, intent)
             return self._trace(matched, "candidate_profiles.can_work_onsite", "FUZZY_MATCHER", STATUS_APPROVED)
 
+        # ── SEXUAL ORIENTATION (checked before GENDER — never infer from gender) ──
+        if self._any_word(ll, ["sexual orientation", "sexual identity"]):
+            val = cp.get("sexual_orientation")
+            if val:
+                matched, found = self._match_option(options, val)
+                return self._trace(matched, "candidate_profiles.sexual_orientation", "FUZZY_MATCHER", STATUS_APPROVED)
+            return self._eeoc_fallback(options, "sexual_orientation")
+
+        # ── TRANSGENDER (checked before GENDER — never infer from gender).
+        # "transgender" contains the substring "gender", so this MUST run
+        # first and MUST use whole-word matching, or a plain gender answer
+        # silently lands on this question instead. ──
+        if self._any_word(ll, ["transgender", "trans identity"]):
+            val = cp.get("transgender_status")
+            if val:
+                matched, found = self._match_option(options, val)
+                return self._trace(matched, "candidate_profiles.transgender_status", "FUZZY_MATCHER", STATUS_APPROVED)
+            return self._eeoc_fallback(options, "transgender_status")
+
         # ── GENDER (always use explicit CRM data — never infer or AI-guess) ──
-        if any(w in ll for w in ["gender", "gender identity"]):
+        if self._any_word(ll, ["gender", "gender identity"]):
             gender_val = cp.get("gender")
             if gender_val:
                 matched, found = self._match_option(options, gender_val)
@@ -365,22 +420,6 @@ class ApplyWizzBrain:
                 matched, found = self._match_option(options, val)
                 return self._trace(matched, "candidate_profiles.disability_status", "FUZZY_MATCHER", STATUS_CORRECTED if found else STATUS_APPROVED)
             return self._eeoc_fallback(options, "disability_status")
-
-        # ── SEXUAL ORIENTATION (never infer from gender) ──
-        if any(w in ll for w in ["sexual orientation", "sexual identity"]):
-            val = cp.get("sexual_orientation")
-            if val:
-                matched, found = self._match_option(options, val)
-                return self._trace(matched, "candidate_profiles.sexual_orientation", "FUZZY_MATCHER", STATUS_APPROVED)
-            return self._eeoc_fallback(options, "sexual_orientation")
-
-        # ── TRANSGENDER (never infer from gender) ──
-        if any(w in ll for w in ["transgender", "trans identity"]):
-            val = cp.get("transgender_status")
-            if val:
-                matched, found = self._match_option(options, val)
-                return self._trace(matched, "candidate_profiles.transgender_status", "FUZZY_MATCHER", STATUS_APPROVED)
-            return self._eeoc_fallback(options, "transgender_status")
 
         # ── SALARY ──
         if any(w in ll for w in ["salary", "compensation", "pay expectation", "desired pay"]):
@@ -462,13 +501,28 @@ class ApplyWizzBrain:
         if any(w in ll for w in ["worked for", "previously employed", "former employee"]):
             return self._trace("No", "deterministic_rule", "FUZZY_MATCHER", STATUS_DERIVED)
 
-        # ── SMS OPT-IN ──
-        if any(w in ll for w in ["opt in", "text message", "sms consent"]):
+        # ── SMS OPT-IN ── ("sms" / "whatsapp" added: a real Klaviyo-style
+        # consent question worded "receive communications via SMS and/or
+        # WhatsApp..." matched none of the original three phrases and fell
+        # through uncaught.
+        if self._any_word(ll, ["opt in", "text message", "sms consent", "sms", "whatsapp"]):
             matched, _ = self._match_option(options, "Yes")
             return self._trace(matched, "deterministic_rule", "FUZZY_MATCHER", STATUS_DERIVED)
 
+        # ── SPECIFIC EMPLOYEE REFERRAL (checked before the general
+        # "how did you hear" branch below) — "Were you referred by a
+        # <Company> employee?" is a yes/no fact about a named referral, not
+        # the open-ended "how did you hear about us" source question, even
+        # though both happen to contain the words "referred by". Answering
+        # it with "Company Website" (correct for the other question) was
+        # wrong here — ApplyWizz has no employee-referral relationships, so
+        # "No" is the honest, always-correct answer to this specific one. ──
+        if self._any_word(ll, ["referred by"]) and self._any_word(ll, ["employee", "current employee"]):
+            matched, _ = self._match_option(options, "No")
+            return self._trace(matched, "deterministic_rule", "FUZZY_MATCHER", STATUS_DERIVED)
+
         # ── HOW DID YOU HEAR ──
-        if any(w in ll for w in ["hear about", "how did you find", "referred by", "source"]):
+        if any(w in ll for w in ["hear about", "how did you find", "source"]):
             matched, _ = self._match_option(options, "Company Website")
             return self._trace(matched, "deterministic_rule", "FUZZY_MATCHER", STATUS_DERIVED)
 
