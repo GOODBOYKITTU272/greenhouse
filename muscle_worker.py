@@ -267,14 +267,21 @@ def smart_fill_field(page, label: str, answer: str, filled: list, failed: list):
                     }}
                     // Consent/acknowledgement checkboxes — the question label IS often
                     // the consent text itself (e.g. "I agree", "by checking this box...").
-                    let checkbox = container.querySelector("input[type='checkbox']");
-                    if(checkbox && radios.length === 0) {{
-                        if (!checkbox.id) checkbox.id = "custom_id_" + Math.random().toString(36).substr(2, 9);
-                        found.push('CHECKBOX:[id="' + checkbox.id + '"]');
+                    // Some questions ("How did you hear about us? select all that apply")
+                    // render as a GROUP of checkboxes under one container, not one — using
+                    // querySelector (singular) here used to silently grab only the first of
+                    // e.g. 11 real options and ignore the rest.
+                    let checkboxes = container.querySelectorAll("input[type='checkbox']");
+                    if(checkboxes.length === 1 && radios.length === 0) {{
+                        if (!checkboxes[0].id) checkboxes[0].id = "custom_id_" + Math.random().toString(36).substr(2, 9);
+                        found.push('CHECKBOX:[id="' + checkboxes[0].id + '"]');
+                    }} else if(checkboxes.length > 1 && radios.length === 0) {{
+                        if (!container.id) container.id = "custom_id_" + Math.random().toString(36).substr(2, 9);
+                        found.push('CHECKBOXGROUP:[id="' + container.id + '"]');
                     }}
                     // Normal text inputs
                     let inp = container.querySelector("input[type='text'], input:not([type]), input[type='tel'], input[type='email']");
-                    if(inp && !combo && !checkbox && radios.length === 0) {{
+                    if(inp && !combo && checkboxes.length === 0 && radios.length === 0) {{
                         if (!inp.id) inp.id = "custom_id_" + Math.random().toString(36).substr(2, 9);
                         found.push('INPUT:[id="' + inp.id + '"]');
                     }}
@@ -330,6 +337,43 @@ def smart_fill_field(page, label: str, answer: str, filled: list, failed: list):
                     log.info(f"   ✅ [CHECKBOX] {label_clean} → checked")
                     return
                 log.warning(f"   ⚠️ Checkbox found for '{label_clean}' but answer '{answer}' isn't a recognized affirmative — leaving unchecked rather than guessing.")
+            elif selector.startswith("CHECKBOXGROUP:"):
+                # A "select all that apply" style question rendered as multiple
+                # real checkboxes (confirmed on real jobs: e.g. an 11-option
+                # "how did you hear about us" checkbox group). The brain today
+                # only ever resolves ONE answer string per question, so this
+                # checks every option whose own text matches that string —
+                # supporting a future comma/semicolon-separated multi-value
+                # answer without breaking today's single-value one.
+                container = page.locator(selector.replace("CHECKBOXGROUP:", ""))
+                option_checkboxes = container.locator("input[type='checkbox']")
+                requested = [v.strip().lower() for v in re.split(r"[,;]", answer) if v.strip()]
+                checked_any = False
+                for i in range(option_checkboxes.count()):
+                    cb = option_checkboxes.nth(i)
+                    cb_label = ""
+                    try:
+                        cb_id = cb.get_attribute("id")
+                        if cb_id:
+                            lbl_loc = page.locator(f"label[for='{cb_id}']")
+                            if lbl_loc.count() > 0:
+                                cb_label = lbl_loc.first.inner_text().strip().lower()
+                    except Exception:
+                        pass
+                    if not cb_label:
+                        # Fall back to the checkbox's own enclosing label text
+                        try:
+                            cb_label = cb.locator("xpath=ancestor::label[1]").inner_text().strip().lower()
+                        except Exception:
+                            cb_label = ""
+                    if cb_label and any(_option_plausibly_matches(cb_label, req) for req in requested):
+                        cb.check(force=True)
+                        checked_any = True
+                if checked_any:
+                    filled.append(label_clean)
+                    log.info(f"   ✅ [CHECKBOX GROUP] {label_clean} → matched option(s) for '{answer}'")
+                    return
+                log.warning(f"   ⚠️ Checkbox group found for '{label_clean}' but no option matched answer '{answer}' — leaving unchecked rather than guessing.")
             elif selector.startswith("INPUT:"):
                 page.locator(selector.replace("INPUT:", "")).fill(answer)
                 filled.append(label_clean)
@@ -520,12 +564,19 @@ def process_job(job):
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
     filled, failed, skipped = [], [], []
 
-    # Extract resume URL and candidate email from answer map
+    # Extract resume URL, cover letter URL, and candidate email from answer map.
+    # id_attr in real Greenhouse forms distinguishes #resume from #cover_letter
+    # even though both fields share the visible label "Attach" — 188/208 real
+    # scanned jobs (90%) have both a resume AND a cover letter upload field.
     resume_url = None
+    cover_letter_url = None
     candidate_email = None
     for a in answers:
         lbl = a.get('label', a.get('question_label', '')).lower()
-        if 'resume' in lbl or 'cv' in lbl:
+        if 'cover letter' in lbl:
+            if a.get('answer') and a['answer'].startswith('http'):
+                cover_letter_url = a['answer']
+        elif 'resume' in lbl or 'cv' in lbl:
             if a.get('answer') and a['answer'].startswith('http'):
                 resume_url = a['answer']
         if 'email' in lbl and a.get('answer'):
@@ -556,6 +607,13 @@ def process_job(job):
     if resume_url and resume_url.startswith('http'):
         resume_filename = resume_url.split('/')[-1].split('?')[0]
         resume_bytes = download_resume(resume_url)
+
+    cover_letter_bytes = None
+    cover_letter_filename = "cover_letter.pdf"
+    if cover_letter_url and cover_letter_url.startswith('http'):
+        cover_letter_filename = cover_letter_url.split('/')[-1].split('?')[0]
+        cover_letter_bytes = download_resume(cover_letter_url)  # same S3-download logic, any file type
+
     if not resume_bytes:
         supabase.table("job_queue").update({
             "status": "VALIDATION_FAILED",
@@ -647,11 +705,15 @@ def process_job(job):
             select_us_country_code(page)
 
             # ── Step 2: Upload Resume ──
+            # Target #resume specifically rather than "the first file input on
+            # the page" — on any job that also has a cover-letter upload (90%
+            # of real scanned jobs do), ".first" is a coin flip on which file
+            # input that actually is, and gives no way to also fill the other one.
             if resume_bytes:
                 try:
                     log.info(f"📎 Uploading resume: {resume_filename}")
-                    file_input = page.locator("input[type=file]").first
-                    file_input.set_input_files({
+                    resume_input = page.locator("input#resume, input[type=file]").first
+                    resume_input.set_input_files({
                         "name": resume_filename,  # FIX 3: use actual filename
                         "mimeType": "application/pdf",
                         "buffer": resume_bytes
@@ -662,6 +724,27 @@ def process_job(job):
                 except Exception as e:
                     log.error(f"Resume upload failed: {e}")
                     failed.append("Resume/CV")
+
+            # ── Step 2b: Upload Cover Letter (if the candidate has one AND the job has the field) ──
+            if cover_letter_bytes:
+                try:
+                    cl_input = page.locator("input#cover_letter")
+                    if cl_input.count() > 0:
+                        log.info(f"📎 Uploading cover letter: {cover_letter_filename}")
+                        cl_input.first.set_input_files({
+                            "name": cover_letter_filename,
+                            "mimeType": "application/pdf",
+                            "buffer": cover_letter_bytes
+                        })
+                        log.info("⏳ Waiting for S3 presigned upload...")
+                        page.wait_for_timeout(60000)
+                        filled.append("Cover Letter")
+                    else:
+                        log.info("   No #cover_letter field on this job — skipping (nothing to upload to).")
+                except Exception as e:
+                    # Cover letter is optional on every job scanned so far — never
+                    # abort a real submission over it the way a failed resume does.
+                    log.warning(f"Cover letter upload failed (non-fatal): {e}")
 
             # ── Step 3: Fill all fields using smart label-based detection ──
             for item in answers:
