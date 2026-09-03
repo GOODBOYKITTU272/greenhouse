@@ -8,6 +8,7 @@ import requests
 import traceback
 import urllib.request
 import urllib.parse
+from datetime import datetime, timezone, timedelta
 
 from supabase import create_client, Client
 from applywizz_brain import ApplyWizzBrain
@@ -187,13 +188,36 @@ def get_or_cache_job_schema(supabase, raw_url):
 # CANDIDATE PROFILE CACHE
 # ─────────────────────────────────────────────
 
+# Was a permanent, never-expiring cache — a candidate's info fetched once
+# would never be re-checked again no matter how stale it got (new resume,
+# updated phone number, anything). Now refreshed from the CRM once per day
+# per candidate, and only for candidates who actually have a job to process
+# that day — never a blanket daily refresh for everyone, which would hit
+# the CRM for inactive candidates for no reason.
+CANDIDATE_PROFILE_REFRESH_HOURS = 24
+
+
+def _is_profile_fresh(updated_at_str) -> bool:
+    if not updated_at_str:
+        return False
+    try:
+        updated_at = datetime.fromisoformat(str(updated_at_str).replace("Z", "+00:00"))
+        return (datetime.now(timezone.utc) - updated_at) < timedelta(hours=CANDIDATE_PROFILE_REFRESH_HOURS)
+    except Exception:
+        return False
+
+
 def get_or_cache_candidate(supabase, applywizz_id):
     resp = supabase.table("candidate_profiles").select("*").eq("applywizz_id", applywizz_id).execute()
     if resp.data:
-        logging.info(f"CACHED profile for {applywizz_id} — no API call needed")
-        return {"profile_json": resp.data[0]["profile_json"], "resume_text": resp.data[0].get("resume_text", "")}
+        row = resp.data[0]
+        if _is_profile_fresh(row.get("updated_at")):
+            logging.info(f"CACHED profile for {applywizz_id} — no API call needed (refreshed within {CANDIDATE_PROFILE_REFRESH_HOURS}h)")
+            return {"profile_json": row["profile_json"], "resume_text": row.get("resume_text", "")}
+        logging.info(f"Cached profile for {applywizz_id} is older than {CANDIDATE_PROFILE_REFRESH_HOURS}h — refreshing from CRM...")
+    else:
+        logging.info(f"First time: fetching {applywizz_id} from CRM API...")
 
-    logging.info(f"First time: fetching {applywizz_id} from CRM API...")
     api_resp = requests.get(f"https://www.apply-wizz.me/api/get-client-details?applywizz_id={applywizz_id}", timeout=15)
     if api_resp.status_code != 200:
         raise Exception(f"CRM API returned {api_resp.status_code} for {applywizz_id}")
@@ -211,7 +235,13 @@ def get_or_cache_candidate(supabase, applywizz_id):
     supabase.table("candidate_profiles").upsert({
         "applywizz_id": applywizz_id,
         "profile_json": profile_json,
-        "resume_text":  resume_text
+        "resume_text":  resume_text,
+        # Upsert leaves columns you don't pass untouched on an UPDATE — the
+        # table's DEFAULT now() only fires on INSERT, so this has to be set
+        # explicitly every time or the freshness check above would never see
+        # a newer timestamp on a refresh and would refetch on every single
+        # job for that candidate forever.
+        "updated_at":   datetime.now(timezone.utc).isoformat(),
     }).execute()
     logging.info(f"Saved {applywizz_id} to candidate_profiles!")
     return {"profile_json": profile_json, "resume_text": resume_text}
