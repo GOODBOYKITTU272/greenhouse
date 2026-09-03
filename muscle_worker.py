@@ -23,6 +23,8 @@ from typing import Optional
 from playwright.sync_api import sync_playwright
 from supabase import create_client
 
+import sync_mailbox_status
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -971,10 +973,36 @@ def claim_next_job():
     return job
 
 
+# How often to refresh candidate_profiles.mailbox_connected from
+# ZOHO_MAIL_READER. Runs inside this already-deployed, already-running
+# Railway worker rather than as a separate script someone has to remember
+# to run locally — this service already has real network access to Zoho
+# (it's already calling it for OTP/confirmation checks below), so no new
+# credentials or setup are needed for this to just work.
+MAILBOX_SYNC_INTERVAL_SECONDS = int(os.environ.get("MAILBOX_SYNC_INTERVAL_SECONDS", 1800))
+_last_mailbox_sync_ts = 0.0
+
+
+def maybe_sync_mailbox_status():
+    global _last_mailbox_sync_ts
+    if time.time() - _last_mailbox_sync_ts < MAILBOX_SYNC_INTERVAL_SECONDS:
+        return
+    try:
+        log.info("📬 Syncing mailbox connectivity status from ZOHO_MAIL_READER...")
+        sync_mailbox_status.sync()
+    except Exception as e:
+        # Never let a sync failure take down job processing — this is a
+        # background nice-to-have, not on the critical path of applying.
+        log.warning(f"   Mailbox sync failed (non-fatal, will retry next cycle): {e}")
+    finally:
+        _last_mailbox_sync_ts = time.time()
+
+
 def run_muscle_worker():
     while True:
         log.info("💪 MUSCLE: Checking for APPROVED jobs...")
         try:
+            maybe_sync_mailbox_status()
             job = claim_next_job()
             if not job:
                 log.info("No APPROVED jobs found. Sleeping 15s...")
