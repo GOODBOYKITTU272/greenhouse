@@ -32,6 +32,12 @@ export default function App() {
   // another job for the same candidate.
   const [jobAnswers, setJobAnswers] = useState({});
   const [approveStatus, setApproveStatus] = useState(null); // {done, total, failed: [{id,url,error}]}
+  // Which of this candidate's jobs are checked for approval — starts with
+  // everything checked (matches the old "Approve All" behavior by default),
+  // but a reviewer can uncheck jobs to approve only a subset, e.g. capping
+  // a phase-1 pilot candidate at 5 jobs instead of approving everything
+  // they happen to have pending.
+  const [selectedJobIds, setSelectedJobIds] = useState(new Set());
 
   useEffect(() => {
     fetchData();
@@ -107,6 +113,16 @@ export default function App() {
     setSharedAnswers(shared);
     setJobAnswers(ja);
     setApproveStatus(null);
+    setSelectedJobIds(new Set(jobs.map(j => j.id)));
+  };
+
+  const toggleJobSelected = (jobId) => {
+    setSelectedJobIds(prev => {
+      const next = new Set(prev);
+      if (next.has(jobId)) next.delete(jobId);
+      else next.add(jobId);
+      return next;
+    });
   };
 
   const handleSharedAnswerChange = (fieldName, newAns) => {
@@ -125,9 +141,11 @@ export default function App() {
 
   const approveAll = async () => {
     if (!selectedCandidate) return;
+    const jobsToApprove = candidateJobs.filter(j => selectedJobIds.has(j.id));
+    if (jobsToApprove.length === 0) return;
     const failed = [];
     let done = 0;
-    for (const job of candidateJobs) {
+    for (const job of jobsToApprove) {
       try {
         // Build this job's own updated answer_map: shared structured fields
         // (by field_name) apply the one candidate-level edit; everything else
@@ -159,7 +177,7 @@ export default function App() {
       }
     }
 
-    setApproveStatus({ done, total: candidateJobs.length, failed });
+    setApproveStatus({ done, total: jobsToApprove.length, failed });
     fetchData();
     // Only auto-close the modal on a clean sweep — if anything failed, keep
     // it open with the failure list visible instead of silently dropping
@@ -399,11 +417,30 @@ export default function App() {
                         </div>
                       </div>
                     )}
+                    {activeTab === 'NEEDS_REVIEW' && (
+                      <div className="flex items-center justify-between text-xs font-semibold text-gray-500">
+                        <span>{selectedJobIds.size} of {candidateJobs.length} jobs selected for approval</span>
+                        <div className="flex gap-3">
+                          <button onClick={() => setSelectedJobIds(new Set(candidateJobs.map(j => j.id)))} className="text-blue-600 hover:underline">Select All</button>
+                          <button onClick={() => setSelectedJobIds(new Set())} className="text-blue-600 hover:underline">Select None</button>
+                        </div>
+                      </div>
+                    )}
                     {candidateJobs.map(job => (
-                      <div key={job.id} className="bg-white border-2 border-gray-100 rounded-xl p-4 shadow-sm">
-                        <a href={job.url} target="_blank" rel="noopener noreferrer" className="font-bold text-blue-600 hover:underline text-sm break-all block mb-3 pb-2 border-b border-gray-100">
-                          {job.url}
-                        </a>
+                      <div key={job.id} className={`bg-white border-2 rounded-xl p-4 shadow-sm ${activeTab === 'NEEDS_REVIEW' && !selectedJobIds.has(job.id) ? 'border-gray-100 opacity-50' : 'border-gray-100'}`}>
+                        <div className="flex items-start gap-3 mb-3 pb-2 border-b border-gray-100">
+                          {activeTab === 'NEEDS_REVIEW' && (
+                            <input
+                              type="checkbox"
+                              checked={selectedJobIds.has(job.id)}
+                              onChange={() => toggleJobSelected(job.id)}
+                              className="mt-1 w-4 h-4 flex-shrink-0"
+                            />
+                          )}
+                          <a href={job.url} target="_blank" rel="noopener noreferrer" className="font-bold text-blue-600 hover:underline text-sm break-all">
+                            {job.url}
+                          </a>
+                        </div>
                         <div className="space-y-3">
                           {Object.entries(jobAnswers[job.id] || {}).map(([label, q], idx) => (
                             <div key={idx} className="bg-gray-50 border border-gray-100 rounded-lg p-3">
@@ -444,9 +481,13 @@ export default function App() {
 
               {activeTab === 'NEEDS_REVIEW' && (
                 <div className="p-6 border-t border-gray-100 bg-gray-50 rounded-b-xl flex justify-end">
-                  <button onClick={approveAll} className="bg-green-500 hover:bg-green-600 text-white px-8 py-3 rounded-xl font-bold text-lg shadow-sm flex items-center gap-2 transition-all transform hover:scale-105">
+                  <button
+                    onClick={approveAll}
+                    disabled={selectedJobIds.size === 0}
+                    className="bg-green-500 hover:bg-green-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white px-8 py-3 rounded-xl font-bold text-lg shadow-sm flex items-center gap-2 transition-all transform hover:scale-105 disabled:hover:scale-100"
+                  >
                     <CheckCircle className="w-6 h-6" />
-                    Approve All {candidateJobs.length} Jobs
+                    Approve Selected ({selectedJobIds.size})
                   </button>
                 </div>
               )}
