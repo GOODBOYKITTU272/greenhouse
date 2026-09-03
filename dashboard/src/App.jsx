@@ -51,12 +51,20 @@ export default function App() {
       const { data, error } = await supabase
         .from('job_queue')
         .select('*')
-        .order('created_at', { ascending: false })
-        // Temporary safety cap — no real pagination exists yet. Fine while
-        // the queue is empty/small; once real daily volume flows in this
-        // needs actual server-side pagination or per-status filtering
-        // instead of raising the number.
-        .limit(2000);
+        // Order by id, not created_at — a bulk CSV import inserts thousands
+        // of rows sharing the exact same created_at timestamp (down to the
+        // microsecond), so ordering by created_at ties arbitrarily among
+        // them and the limit below could silently cut off the very
+        // NEEDS_REVIEW/APPROVED rows a reviewer needs to see, while a huge
+        // untouched PENDING backlog fills the page instead. id is unique,
+        // so this ordering is deterministic and always surfaces the most
+        // recently created (and typically most recently processed) rows.
+        .order('id', { ascending: false })
+        // Temporary safety cap — no real pagination exists yet. Comfortably
+        // covers today's real volume (5,405 imported rows); once daily
+        // volume grows past this, it needs actual server-side pagination
+        // or per-status filtering instead of raising the number.
+        .limit(10000);
 
       if (error) throw error;
       
