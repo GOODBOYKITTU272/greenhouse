@@ -191,8 +191,17 @@ class ApplyWizzBrain:
         "veteranstatus". Must run before .lower() — the case transition
         that marks the boundary is destroyed once everything is the same
         case.
+
+        "LinkedIn" is itself internally CamelCase (lowercase "d" directly
+        followed by capital "I"), so the same rule was also splitting it
+        into "Linked In" — a real, confirmed regression: "LinkedIn Profile"
+        stopped matching "linkedin" at all and fell through to the AI
+        router instead of the candidate's real profile URL. Restore it as
+        one word after the split, since "linked in" as two separate words
+        essentially never appears in a real label except as this name.
         """
-        return re.sub(r'(?<=[a-z0-9])(?=[A-Z])', ' ', label).lower()
+        normalized = re.sub(r'(?<=[a-z0-9])(?=[A-Z])', ' ', label).lower()
+        return normalized.replace('linked in', 'linkedin')
 
     def _has_conflicting_locations(self, original_label):
         """
