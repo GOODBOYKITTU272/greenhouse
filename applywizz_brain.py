@@ -59,6 +59,15 @@ AI_NON_USE_ATTESTATION_RE = re.compile(
     re.IGNORECASE,
 )
 
+# City-name patterns used to catch a real, confirmed employer form error —
+# a question that names two different cities for what should be one
+# location ("This role is onsite in Palo Alto, CA. Will you come into the
+# Boston office five times per week?"). Deliberately narrow: only these two
+# specific shapes ("City, ST" and "the <City> office"), so this doesn't
+# flag the vast majority of onsite questions that correctly name one place.
+CITY_STATE_RE = re.compile(r'\b([A-Z][a-zA-Z]+(?: [A-Z][a-zA-Z]+)?),\s*([A-Z]{2})\b')
+THE_CITY_OFFICE_RE = re.compile(r'\bthe ([A-Z][a-zA-Z]+(?: [A-Z][a-zA-Z]+)?) office\b')
+
 # ─────────────────────────────────────────────
 # STATUS CODES
 # ─────────────────────────────────────────────
@@ -176,6 +185,21 @@ class ApplyWizzBrain:
         case.
         """
         return re.sub(r'(?<=[a-z0-9])(?=[A-Z])', ' ', label).lower()
+
+    def _has_conflicting_locations(self, original_label):
+        """
+        True if a location/onsite-commitment question mentions two
+        different-looking city names — see CITY_STATE_RE/THE_CITY_OFFICE_RE
+        above for the real case this catches. Takes the ORIGINAL label
+        (not the lowercased/normalized one) since city name capitalization
+        is what the patterns match on.
+        """
+        cities = set()
+        for m in CITY_STATE_RE.finditer(original_label):
+            cities.add(m.group(1))
+        for m in THE_CITY_OFFICE_RE.finditer(original_label):
+            cities.add(m.group(1))
+        return len(cities) >= 2
 
     def _any_word(self, text, phrases):
         """
@@ -424,6 +448,14 @@ class ApplyWizzBrain:
 
         # ── Onsite / Hybrid ──
         if any(w in ll for w in ["days in office", "onsite", "on-site", "hybrid"]):
+            # A real, confirmed employer form error: "This role is onsite in
+            # Palo Alto, CA. Will you come into the Boston office five times
+            # per week?" — two different cities in one question. Answering
+            # "Yes" without noticing looked exactly like a correct answer in
+            # the dossier. Route to a human instead of guessing which city
+            # the question actually means.
+            if self._has_conflicting_locations(label):
+                return self._trace("", "conflicting_locations_in_question", "FUZZY_MATCHER", STATUS_NEEDS_ATTENTION)
             can = cp.get("can_work_onsite", True)
             intent = "Yes" if can else "No"
             matched, _ = self._match_option(options, intent)
