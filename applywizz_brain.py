@@ -669,12 +669,25 @@ class ApplyWizzBrain:
         if any(w in ll for w in ["address line 2", "apt", "suite"]):
             return self._trace("", "deterministic_rule", "FUZZY_MATCHER", STATUS_DERIVED)
 
-        if "city" in ll and "state" not in ll:
+        # "state" is also checked as a whole word here — a plain substring
+        # test matched "statement" too (a real ITAR export-compliance
+        # question asking to pick a "statement" from a list was getting
+        # answered with the candidate's home address, because it matched
+        # this branch by accident).
+        if self._any_word(ll, ["city"]) and not self._any_word(ll, ["state"]):
             val = cp.get("city", "")
             return self._trace(val, "candidate_profiles.city", "FUZZY_MATCHER", STATUS_APPROVED if val else STATUS_NEEDS_ATTENTION)
 
-        if "state" in ll and "united" not in ll:
+        if self._any_word(ll, ["state"]) and not self._any_word(ll, ["united"]):
             val = cp.get("state", "")
+            # A real state name/abbreviation is short and has no commas.
+            # candidate_profiles.state comes straight from the CRM's
+            # state_of_residence field with no validation on our side — if
+            # that field was mistakenly filled with a full address at the
+            # source, submitting it as someone's "state" is worse than
+            # leaving it blank for a human to fix.
+            if val and ("," in val or len(val) > 20):
+                return self._trace("", "candidate_profiles.state_looks_malformed", "FUZZY_MATCHER", STATUS_NEEDS_ATTENTION)
             matched, _ = self._match_option(options, val)
             return self._trace(matched, "candidate_profiles.state", "FUZZY_MATCHER", STATUS_APPROVED if val else STATUS_NEEDS_ATTENTION)
 
