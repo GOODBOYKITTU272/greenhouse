@@ -68,6 +68,14 @@ AI_NON_USE_ATTESTATION_RE = re.compile(
 CITY_STATE_RE = re.compile(r'\b([A-Z][a-zA-Z]+(?: [A-Z][a-zA-Z]+)?),\s*([A-Z]{2})\b')
 THE_CITY_OFFICE_RE = re.compile(r'\bthe ([A-Z][a-zA-Z]+(?: [A-Z][a-zA-Z]+)?) office\b')
 
+# For an unrecognized optional knockout question (see _layer3_ai_router): the
+# narrow set of topics where agreeing/"Yes" would hurt the application, so
+# "No" is the favorable default instead of the usual "Yes".
+KNOCKOUT_NEGATIVE_WORDS = [
+    "felony", "convicted", "conviction", "terminated", "fired",
+    "disqualif", "lawsuit", "sued", "non-compete", "noncompete",
+]
+
 # ─────────────────────────────────────────────
 # STATUS CODES
 # ─────────────────────────────────────────────
@@ -276,6 +284,22 @@ class ApplyWizzBrain:
         if self._any_word(ll, ["opt in", "text message", "sms consent", "sms", "whatsapp"]):
             return "sms_optin"
         return raw_field_name
+
+    def _is_yes_no_shaped(self, options):
+        """
+        True only for a genuinely binary Yes/No option list (checked by
+        confirming _match_option can find both a "Yes" and a "No" among the
+        real options, not just guessing from the count) — a real free-text
+        question (no options at all) or a real multi-choice dropdown never
+        qualifies, so the knockout default in _layer3_ai_router can't fire
+        on a question that actually needs written content or a specific
+        choice from a longer list.
+        """
+        if not options or len(options) > 4:
+            return False
+        _, yes_found = self._match_option(options, "Yes")
+        _, no_found = self._match_option(options, "No")
+        return yes_found and no_found
 
     def _match_option(self, options, intent):
         """
@@ -741,6 +765,23 @@ class ApplyWizzBrain:
                 return self._trace("", "ai_ban_rule", "AI_ROUTER", STATUS_NEEDS_ATTENTION)
 
         if not required:
+            # A knockout-shaped question (a small closed Yes/No option list)
+            # that Greenhouse happens to mark optional was still coming
+            # back blank — the named branches in _layer2_fuzzy_matcher
+            # already give a favorable default for every category worded in
+            # a way they recognize (relocate, onsite, drug screen, etc.);
+            # this is the fallback for the same kind of question worded in
+            # a way none of those branches catch. Answers "No" only for the
+            # narrow set of knockout questions where agreeing would hurt
+            # the application (felony, past termination, non-compete); "Yes"
+            # otherwise, matching the convention every named branch already
+            # uses. A genuinely open-ended optional question (no closed
+            # option list — needs real writing, e.g. "Why do you want to
+            # work here?") is untouched and stays blank, not auto-written.
+            if self._is_yes_no_shaped(options):
+                intent = "No" if self._any_word(ll, KNOCKOUT_NEGATIVE_WORDS) else "Yes"
+                matched, _ = self._match_option(options, intent)
+                return self._trace(matched, "knockout_default", "AI_ROUTER", STATUS_DERIVED)
             return self._trace("", "deterministic_rule", "AI_ROUTER", STATUS_DERIVED)
 
         self.ai_questions_count += 1
