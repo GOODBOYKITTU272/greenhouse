@@ -51,6 +51,14 @@ CREATE TABLE IF NOT EXISTS job_schemas (
     job_id          TEXT,
     job_title       TEXT,
     question_count  INTEGER,
+    -- Computed once at parse time by brain_worker.py's calculate_complexity()
+    -- — an approximation of the ORD's per-control complexity weighting using
+    -- only fields this codebase actually parses (option count, not a true
+    -- Greenhouse control-type field, which was never inspected here).
+    -- automation_tier is A/B/C only; Tier D ("unsupported form") is not
+    -- assigned anywhere yet — nothing detects that case at parse time.
+    complexity_score  INTEGER,
+    automation_tier   TEXT,
     job_data        JSONB NOT NULL,   -- raw Greenhouse job payload (questions, demographic_questions, compliance, etc.)
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );

@@ -178,6 +178,52 @@ def fetch_greenhouse_job_data(canonical):
     return board_token, job_id, resp.json()
 
 
+# Weight per question, approximating ORD §13's complexity table using only
+# the fields this codebase has ever actually parsed from Greenhouse's public
+# API (label, required, values/answer_options) — Greenhouse's raw response
+# was never fully inspected here, so a genuine per-control TYPE (dropdown vs.
+# checkbox vs. date picker vs. conditional field) can't be told apart the way
+# the ORD describes. This approximates by option count instead: free text (no
+# options) is cheapest, a short option list is a simple choice, a long one is
+# closer to a real multi-select. Tier D ("unsupported form") is deliberately
+# NOT assigned here — nothing in this codebase currently detects a genuinely
+# unsupported control at parse time, so claiming to would be a guess, not a
+# measurement.
+def _question_weight(q):
+    options = q.get("values") or q.get("answer_options") or []
+    n = len(options)
+    if n == 0:
+        return 1
+    if n <= 3:
+        return 2
+    return 3
+
+
+def calculate_complexity(job_data):
+    """
+    Returns (complexity_score, automation_tier) for a job's parsed schema.
+    Tier thresholds are intentionally simple and adjustable — ORD §14 says
+    as much ("exact thresholds should remain configurable"). Counts both
+    regular and demographic questions, since demographic questions add real
+    review burden even though they're auto-resolved.
+    """
+    questions = job_data.get("questions") or []
+    demo = (job_data.get("demographic_questions") or {}).get("questions") or []
+    all_q = list(questions) + list(demo)
+
+    score = sum(_question_weight(q) for q in all_q)
+    q_count = len(all_q)
+
+    if q_count <= 10 and score <= 20:
+        tier = "A"
+    elif q_count <= 20 and score <= 45:
+        tier = "B"
+    else:
+        tier = "C"
+
+    return score, tier
+
+
 def get_or_cache_job_schema(supabase, raw_url):
     """
     Fetch the Greenhouse job schema ONCE per unique job URL.
@@ -195,16 +241,19 @@ def get_or_cache_job_schema(supabase, raw_url):
     board_token, job_id, job_data = fetch_greenhouse_job_data(canonical)
 
     q_count = len(job_data.get("questions") or [])
-    logging.info(f"  ✅ Scanned: '{job_data.get('title','')}' — {q_count} questions. Caching forever.")
+    complexity_score, automation_tier = calculate_complexity(job_data)
+    logging.info(f"  ✅ Scanned: '{job_data.get('title','')}' — {q_count} questions, complexity {complexity_score} (Tier {automation_tier}). Caching forever.")
 
     supabase.table("job_schemas").upsert({
-        "canonical_url":  canonical,
-        "raw_url":        raw_url,
-        "board_token":    board_token,
-        "job_id":         str(job_id),
-        "job_title":      job_data.get("title", ""),
-        "question_count": q_count,
-        "job_data":       job_data,
+        "canonical_url":     canonical,
+        "raw_url":           raw_url,
+        "board_token":       board_token,
+        "job_id":            str(job_id),
+        "job_title":         job_data.get("title", ""),
+        "question_count":    q_count,
+        "complexity_score":  complexity_score,
+        "automation_tier":   automation_tier,
+        "job_data":          job_data,
     }).execute()
 
     return job_data
