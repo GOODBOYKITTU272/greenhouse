@@ -21,7 +21,12 @@ CREATE TABLE IF NOT EXISTS job_queue (
     client_name           TEXT,
     url                   TEXT NOT NULL,
     status                TEXT NOT NULL DEFAULT 'PENDING',
-    application_data      JSONB,              -- brain_worker's full answer_map + metadata
+    -- brain_worker's full answer_map + metadata. import_daily_csv.py also
+    -- writes application_data.source_csv = {score, scored_job_id,
+    -- source_date, imported_at, source_file} on insert, before brain_worker
+    -- ever touches the row — claim_next_approved_job() reads .score from
+    -- here to claim each candidate's highest-scoring job first.
+    application_data      JSONB,
     approved_answer_map   JSONB,              -- real per-job telemetry captured by muscle_worker
                                                -- ({started_at, time_taken, email}) once VERIFIED_APPLIED;
                                                -- never populate this with placeholder/templated values
