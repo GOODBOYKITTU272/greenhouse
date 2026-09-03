@@ -1,6 +1,10 @@
 import { createClient } from '@supabase/supabase-js'
 
 const SUPABASE_URL = "https://lnlvxsskkxeidlqgqqrj.supabase.co"
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxubHZ4c3Nra3hlaWRscWdxcXJqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc5MzkxNjUsImV4cCI6MjEwMzUxNTE2NX0.0yvxG0uJXDYUQqPXRlFG_DAxpm6Ln0EsY-X1HdtFByc"
+// The project's legacy JWT-format anon key stopped working (401 Invalid API
+// key) once the Supabase project switched to the new key format — this is
+// the new publishable key, meant to be public/embedded in client code just
+// like this, same tier as the old anon key it replaces.
+const SUPABASE_ANON_KEY = "sb_publishable_kmi9vgqtx4K8iuSHhWBQig_yBZanJoW"
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
