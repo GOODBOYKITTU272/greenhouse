@@ -29,6 +29,36 @@ const SHARED_FIELD_NAMES = new Set([
   'employee_referral', 'how_did_you_hear', 'sms_optin',
 ]);
 
+// Every answer already carries where it came from (source/resolver/status —
+// written by applywizz_brain.py's 4-layer answer engine) but the dashboard
+// never showed it. Turns that into a short, plain-English tag so a reviewer
+// can tell at a glance whether an answer came straight from the candidate's
+// real Supabase profile, a deterministic rule, the AI, or a remembered
+// answer from a previous job — exactly what would have caught the ITAR
+// export-compliance question sooner (it would have read "From Supabase
+// profile" right next to a street address, instead of looking identical to
+// every correct answer around it).
+function describeSource(q) {
+  if (q.status === 'NEEDS_ATTENTION') return { text: 'Needs your input', color: 'bg-amber-100 text-amber-800' };
+  if (q.source === 'memory_bank') return { text: 'Remembered from a previous job', color: 'bg-purple-100 text-purple-800' };
+  if (q.resolver === 'BASIC_CATCH') return { text: 'From Supabase profile', color: 'bg-blue-100 text-blue-800' };
+  if (q.resolver === 'FUZZY_MATCHER') {
+    if ((q.source || '').startsWith('candidate_profiles.')) return { text: 'From Supabase profile', color: 'bg-blue-100 text-blue-800' };
+    if (q.source === 'deterministic_rule' || q.source === 'knockout_default') return { text: 'Fixed rule (always the same answer)', color: 'bg-gray-100 text-gray-600' };
+    return { text: 'Auto-matched (Fuzzy Matcher)', color: 'bg-teal-100 text-teal-800' };
+  }
+  if (q.resolver === 'AI_ROUTER') {
+    if ((q.source || '').startsWith('ai_generated')) return { text: 'Answered by AI', color: 'bg-indigo-100 text-indigo-800' };
+    return { text: 'Fixed rule (always the same answer)', color: 'bg-gray-100 text-gray-600' };
+  }
+  return { text: q.source || 'Unknown source', color: 'bg-gray-100 text-gray-600' };
+}
+
+function SourceTag({ q }) {
+  const { text, color } = describeSource(q);
+  return <span className={`inline-block text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${color} mb-2`}>{text}</span>;
+}
+
 export default function App() {
   const [allJobs, setAllJobs] = useState([]);
   const [stats, setStats] = useState({ pending: 0, needsReview: 0, approved: 0, completed: 0, failed: 0, total: 0 });
@@ -445,6 +475,7 @@ export default function App() {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           {Object.entries(sharedAnswers).map(([fieldName, q]) => (
                             <div key={fieldName} className="bg-white border border-blue-100 rounded-lg p-3">
+                              <div><SourceTag q={q} /></div>
                               <p className="text-sm font-bold text-gray-700 mb-2">Q: {q.label}</p>
                               {(fieldName === 'resume' || fieldName === 'cover_letter') ? (
                                 // A signed S3 URL, not free text a human should hand-edit —
@@ -499,6 +530,7 @@ export default function App() {
                         <div className="space-y-3">
                           {Object.entries(jobAnswers[job.id] || {}).map(([label, q], idx) => (
                             <div key={idx} className="bg-gray-50 border border-gray-100 rounded-lg p-3">
+                              <div><SourceTag q={q} /></div>
                               <p className="text-sm font-bold text-gray-700 mb-2">Q: {label}</p>
                               <input
                                 type="text"
