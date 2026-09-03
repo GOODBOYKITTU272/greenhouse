@@ -155,6 +155,7 @@ export default function App() {
     const jobsToApprove = candidateJobs.filter(j => selectedJobIds.has(j.id));
     if (jobsToApprove.length === 0) return;
     const failed = [];
+    const memoryFailed = [];
     let done = 0;
     for (const job of jobsToApprove) {
       try {
@@ -182,13 +183,40 @@ export default function App() {
 
         if (error) throw error;
         done++;
+
+        // Save every non-empty reviewed answer back to the memory bank,
+        // keyed by (applywizz_id, question_label) — so the next job that
+        // asks this candidate the same question (a shared field, or just a
+        // custom question worded identically to one already answered)
+        // reuses this answer instead of coming back blank for a human to
+        // retype. A failure here does NOT roll back the approval above —
+        // the job really is approved — but it's tracked separately so a
+        // silent write failure (e.g. an RLS block) is visible immediately
+        // rather than discovered weeks later as "why do I keep re-typing
+        // this candidate's answers."
+        const memoryRows = answerMap
+          .filter(q => (q.answer || '').trim())
+          .map(q => ({
+            applywizz_id: selectedCandidate.applywizz_id,
+            question_label: q.question_label || q.label,
+            answer: q.answer,
+          }));
+        if (memoryRows.length > 0) {
+          const { error: memErr } = await supabase
+            .from('ai_memory_bank')
+            .upsert(memoryRows, { onConflict: 'applywizz_id,question_label' });
+          if (memErr) {
+            console.error(`Memory bank write failed for job [${job.id}]:`, memErr);
+            memoryFailed.push({ id: job.id, url: job.url, error: memErr.message || String(memErr) });
+          }
+        }
       } catch (err) {
         console.error(`Failed to approve job [${job.id}] (${job.url}):`, err);
         failed.push({ id: job.id, url: job.url, error: err.message || String(err) });
       }
     }
 
-    setApproveStatus({ done, total: jobsToApprove.length, failed });
+    setApproveStatus({ done, total: jobsToApprove.length, failed, memoryFailed });
     fetchData();
     // Only auto-close the modal on a clean sweep — if anything failed, keep
     // it open with the failure list visible instead of silently dropping
@@ -486,6 +514,18 @@ export default function App() {
                         </ul>
                       </div>
                     )}
+                  </div>
+                )}
+                {approveStatus?.memoryFailed?.length > 0 && (
+                  <div className="mt-4 rounded-xl p-4 text-sm font-semibold bg-yellow-50 border-2 border-yellow-300 text-yellow-800">
+                    <div className="space-y-2">
+                      <p>⚠️ {approveStatus.memoryFailed.length} job(s) approved, but their answers failed to save to the memory bank — this candidate's questions will come back blank again next time instead of being remembered:</p>
+                      <ul className="list-disc list-inside space-y-1">
+                        {approveStatus.memoryFailed.map(f => (
+                          <li key={f.id} className="break-all">Job [{f.id}] {f.url} — {f.error}</li>
+                        ))}
+                      </ul>
+                    </div>
                   </div>
                 )}
               </div>
