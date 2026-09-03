@@ -163,6 +163,20 @@ class ApplyWizzBrain:
     # OPTION MATCHERS
     # ──────────────────────────────────────────
 
+    def _normalize_label(self, label):
+        """
+        Lowercase a question label for keyword matching, first inserting a
+        space at CamelCase boundaries. Real Greenhouse forms use both
+        "Disability Status" and "DisabilityStatus" (confirmed in production
+        dossiers) — the concatenated form has no true word boundary before
+        "Status", so a plain .lower() would make "disability" and
+        "veteran" unmatchable as whole words inside "disabilitystatus" /
+        "veteranstatus". Must run before .lower() — the case transition
+        that marks the boundary is destroyed once everything is the same
+        case.
+        """
+        return re.sub(r'(?<=[a-z0-9])(?=[A-Z])', ' ', label).lower()
+
     def _any_word(self, text, phrases):
         """
         Like `any(p in text for p in phrases)` but matches on whole-word/
@@ -173,6 +187,71 @@ class ApplyWizzBrain:
         transgender question.
         """
         return any(re.search(r'\b' + re.escape(p) + r'\b', text) for p in phrases)
+
+    def _canonical_field_name(self, label, raw_field_name):
+        """
+        A candidate-level fact (relocate, work authorization, race, veteran
+        status, etc.) gets an arbitrary per-form field_name from Greenhouse
+        — different companies use different internal keys for the same
+        question, and EEOC/demographic questions all share one generic
+        "demographic_question" key regardless of whether they ask about
+        race, gender, or veteran status. Neither is safe to group a review
+        dossier by. This returns a stable key derived from what the
+        question is actually about, mirroring the same categories
+        _layer2_fuzzy_matcher already recognizes, so the dashboard can
+        show "Race" once instead of once per job even though the two
+        forms word it differently and Greenhouse names the field
+        differently — and so "Race" and "Veteran Status" never collide
+        into the same row just because they share Greenhouse's generic
+        demographic field name. Returns raw_field_name unchanged for any
+        question that isn't one of these recognized candidate-level
+        facts, since a genuinely company-specific question (e.g. "Why do
+        you want to work here?") must never be shared across jobs.
+        """
+        ll = self._normalize_label(label)
+        if "address" in ll and "relocat" in ll:
+            return "current_address"
+        if self._any_word(ll, ["authorized to work", "legally authorized", "authorized work", "employment authorization"]):
+            return "work_authorization"
+        if self._any_word(ll, ["sponsorship", "sponsor", "visa"]):
+            return "sponsorship"
+        if self._any_word(ll, ["relocate", "relocation", "willing to move"]):
+            return "willing_to_relocate"
+        if self._any_word(ll, ["days in office", "onsite", "on-site", "hybrid"]):
+            return "can_work_onsite"
+        if self._any_word(ll, ["sexual orientation", "sexual identity"]):
+            return "sexual_orientation"
+        if self._any_word(ll, ["transgender", "trans identity"]):
+            return "transgender_status"
+        if self._any_word(ll, ["gender", "gender identity"]):
+            return "gender"
+        if self._any_word(ll, ["hispanic", "latino", "latina"]):
+            return "hispanic_latino"
+        if self._any_word(ll, ["race", "ethnicity", "racial", "ethnic origin"]):
+            return "race"
+        if self._any_word(ll, ["veteran", "armed forces", "military service"]):
+            return "veteran_status"
+        if self._any_word(ll, ["disability", "disabled", "chronic condition"]):
+            return "disability_status"
+        if self._any_word(ll, ["salary", "compensation", "pay expectation", "desired pay"]):
+            return "salary_expectation"
+        if self._any_word(ll, ["start date", "when can you start", "available to start"]):
+            return "start_date"
+        if "security clearance" in ll:
+            return "security_clearance"
+        if self._any_word(ll, ["felony", "criminal", "convicted"]):
+            return "convicted_of_felony"
+        if "drug" in ll:
+            return "willing_drug_screen"
+        if self._any_word(ll, ["background check"]):
+            return "willing_background_check"
+        if self._any_word(ll, ["referred by"]) and self._any_word(ll, ["employee", "current employee"]):
+            return "employee_referral"
+        if self._any_word(ll, ["hear about", "how did you find", "source"]):
+            return "how_did_you_hear"
+        if self._any_word(ll, ["opt in", "text message", "sms consent", "sms", "whatsapp"]):
+            return "sms_optin"
+        return raw_field_name
 
     def _match_option(self, options, intent):
         """
@@ -266,7 +345,7 @@ class ApplyWizzBrain:
         # matching this shortcut on that buried word and getting answered
         # with the candidate's email address instead of the actual Yes/No
         # consent question.
-        lbl = label.lower()
+        lbl = self._normalize_label(label)
         head = lbl[:40]
         if "first name" in head:
             key = "first_name"
@@ -305,7 +384,7 @@ class ApplyWizzBrain:
         NEVER invents answers. Always reads from candidate_profile.
         """
         cp  = self.candidate_profile
-        ll  = label.lower()
+        ll  = self._normalize_label(label)
 
         # ── Work Authorization ──
         if any(w in ll for w in ["authorized to work", "legally authorized", "authorized work", "employment authorization"]):
@@ -624,7 +703,7 @@ class ApplyWizzBrain:
         Only for custom free-text questions.
         BANNED from structured / EEOC fields.
         """
-        ll = label.lower()
+        ll = self._normalize_label(label)
         for banned_word in STRUCTURED_ONLY_FIELDS:
             if banned_word in ll:
                 return self._trace("", "ai_ban_rule", "AI_ROUTER", STATUS_NEEDS_ATTENTION)
@@ -693,7 +772,7 @@ class ApplyWizzBrain:
         Never store hallucinations. Never store AI_PLACEHOLDER.
         """
         answer = trace.get("answer", "") or ""
-        ll     = label.lower()
+        ll     = self._normalize_label(label)
 
         # Always blank these
         if any(w in ll for w in ["address line 2", "address line 3", "county"]):
@@ -784,7 +863,7 @@ class ApplyWizzBrain:
             trace = self._layer4_final_judge(trace, label, options)
 
             answer_map.append({
-                "field_name": field_name,
+                "field_name": self._canonical_field_name(label, field_name),
                 "label":      label,
                 "required":   required,
                 "answer":     trace["answer"],
@@ -807,7 +886,7 @@ class ApplyWizzBrain:
             trace = self._layer4_final_judge(trace, label, options)
 
             answer_map.append({
-                "field_name": "demographic_question",
+                "field_name": self._canonical_field_name(label, "demographic_question"),
                 "label":      label,
                 "required":   dq.get("required", False),
                 "answer":     trace["answer"],
