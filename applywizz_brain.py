@@ -43,6 +43,22 @@ STRUCTURED_ONLY_FIELDS = {
     "salary", "salary_expectation", "county",
 }
 
+# A question/checkbox whose text has the CANDIDATE attest they did NOT use AI
+# to generate their responses (confirmed real: Medium's "I confirm that I did
+# not use AI to generate any of the following responses"). Answering or
+# checking this affirmatively on an AI-generated application is a false
+# attestation — this is checked in layer 1, before the label ever reaches the
+# AI router, because the AI itself has no way to know its own answer would be
+# a lie in this specific context. Deliberately narrow (requires an explicit
+# "I confirm/declare/certify ... did not/have not ... AI" shape) so it never
+# catches the opposite, legitimate kind of AI question — e.g. ClickHouse's
+# "By selecting Yes, I am consenting to the use of AI for evaluating my
+# candidacy," which is about the EMPLOYER's AI use and is fine to answer Yes.
+AI_NON_USE_ATTESTATION_RE = re.compile(
+    r"\bi\s+(?:confirm|declare|certify)\b.{0,40}\b(?:did\s+not|didn['’]t|have\s+not|haven['’]t|without)\b.{0,40}\bai\b",
+    re.IGNORECASE,
+)
+
 # ─────────────────────────────────────────────
 # STATUS CODES
 # ─────────────────────────────────────────────
@@ -86,8 +102,13 @@ class ApplyWizzBrain:
                 pass
 
         for pattern in [
-            r"boards\.greenhouse\.io/([^/]+)/jobs/(\d+)",
-            r"job-boards\.greenhouse\.io/([^/]+)/jobs/(\d+)",
+            # (?:\w+\.)? allows a region subdomain (boards.eu.greenhouse.io,
+            # job-boards.eu.greenhouse.io) — same fix as brain_worker.py's
+            # parse_greenhouse_ids, needed here too since this constructor
+            # runs (and can raise) before that module's pre-fetched job_data
+            # is ever injected.
+            r"boards\.(?:\w+\.)?greenhouse\.io/([^/]+)/jobs/(\d+)",
+            r"job-boards\.(?:\w+\.)?greenhouse\.io/([^/]+)/jobs/(\d+)",
             r"for=([^&]+).*token=(\d+)",
         ]:
             m = re.search(pattern, url)
@@ -180,6 +201,17 @@ class ApplyWizzBrain:
         Map well-known Greenhouse field names directly to candidate profile.
         Returns a trace dict or None.
         """
+        # Hard block, checked first: never let this reach the AI router,
+        # which has no way to know that any answer it gives here is a false
+        # statement about itself. Route to human review instead of guessing.
+        if label and AI_NON_USE_ATTESTATION_RE.search(label):
+            return self._trace(
+                answer="",
+                source="ai_attestation_conflict",
+                resolver="BASIC_CATCH",
+                status=STATUS_NEEDS_ATTENTION,
+            )
+
         cp = self.candidate_profile
         phone_val = cp.get("phone")
         if not phone_val or phone_val == "+":
