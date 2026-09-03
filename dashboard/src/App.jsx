@@ -48,28 +48,31 @@ export default function App() {
   async function fetchData() {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('job_queue')
-        .select('*')
-        // Order by id, not created_at — a bulk CSV import inserts thousands
-        // of rows sharing the exact same created_at timestamp (down to the
-        // microsecond), so ordering by created_at ties arbitrarily among
-        // them and the limit below could silently cut off the very
-        // NEEDS_REVIEW/APPROVED rows a reviewer needs to see, while a huge
-        // untouched PENDING backlog fills the page instead. id is unique,
-        // so this ordering is deterministic and always surfaces the most
-        // recently created (and typically most recently processed) rows.
-        .order('id', { ascending: false })
-        // Temporary safety cap — no real pagination exists yet. Comfortably
-        // covers today's real volume (5,405 imported rows); once daily
-        // volume grows past this, it needs actual server-side pagination
-        // or per-status filtering instead of raising the number.
-        .limit(10000);
+      // Supabase's PostgREST API enforces its own server-side "Max Rows" cap
+      // (defaults to 1000) on every response, REGARDLESS of what .limit()
+      // the client asks for — raising .limit() alone can't get past it. So
+      // page through with .range() instead, looping until a page comes back
+      // short, which always fetches every row no matter how large the
+      // queue gets or what the project's cap is set to.
+      const PAGE_SIZE = 1000;
+      let all = [];
+      let from = 0;
+      while (true) {
+        const { data: page, error } = await supabase
+          .from('job_queue')
+          .select('*')
+          .order('id', { ascending: true })
+          .range(from, from + PAGE_SIZE - 1);
 
-      if (error) throw error;
-      
+        if (error) throw error;
+        all = all.concat(page || []);
+        if (!page || page.length < PAGE_SIZE) break;
+        from += PAGE_SIZE;
+      }
+      const data = all;
+
       setAllJobs(data || []);
-      
+
       const st = { pending: 0, needsReview: 0, approved: 0, completed: 0, failed: 0, total: data.length };
       data.forEach(j => {
         if (j.status === 'PENDING' || j.status === 'PENDING_NEW') st.pending++;
