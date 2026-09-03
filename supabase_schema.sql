@@ -69,6 +69,11 @@ CREATE TABLE IF NOT EXISTS candidate_profiles (
     -- status, so there's no reason to claim their job ahead of one who can.
     mailbox_connected  BOOLEAN NOT NULL DEFAULT false,
     mailbox_synced_at  TIMESTAMPTZ,
+    -- Set by pick_pilot_candidates.py for exactly the phase-1 pilot
+    -- candidates. claim_next_approved_job() uses a 3-minute per-candidate
+    -- cooldown for is_pilot=true candidates instead of the normal 27
+    -- minutes — everyone else is unaffected. Not touched anywhere else.
+    is_pilot           BOOLEAN NOT NULL DEFAULT false,
     -- AI-parsed {street, city, state, zip_code} from profile_json's
     -- full_address, written once per candidate by parse_address_with_ai()
     -- alongside the CRM fetch/refresh — replaces the old comma-splitting
