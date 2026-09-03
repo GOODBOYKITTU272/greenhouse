@@ -8,9 +8,25 @@ import { Briefcase, CheckCircle, AlertCircle, Clock, X } from 'lucide-react';
 // candidate's pending jobs. Everything else (custom/free-text questions, and
 // demographic_question, whose wording+meaning both vary per company even when
 // they happen to look similar) stays edited per-job — see jobAnswers below.
+// Greenhouse's own 8 standardized field_names, plus every canonical key
+// applywizz_brain.py's _canonical_field_name() derives for a candidate-level
+// fact that isn't one of those 8 — relocation, work authorization, EEOC/
+// demographic questions, etc. Those facts get an arbitrary, per-form
+// field_name straight from Greenhouse (different for every company, and
+// identical across totally different EEOC questions), so grouping the
+// dossier by field_name only works once the brain has already normalized
+// it — this set has to name every key _canonical_field_name() can produce,
+// or that fact silently falls back to being asked once per job again.
 const SHARED_FIELD_NAMES = new Set([
   'first_name', 'last_name', 'email', 'phone',
   'resume', 'cover_letter', 'linkedin_profile', 'website',
+  'current_address', 'work_authorization', 'sponsorship',
+  'willing_to_relocate', 'can_work_onsite',
+  'gender', 'transgender_status', 'sexual_orientation',
+  'hispanic_latino', 'race', 'veteran_status', 'disability_status',
+  'salary_expectation', 'start_date', 'security_clearance',
+  'convicted_of_felony', 'willing_drug_screen', 'willing_background_check',
+  'employee_referral', 'how_did_you_hear', 'sms_optin',
 ]);
 
 export default function App() {
@@ -426,7 +442,7 @@ export default function App() {
                     {Object.keys(sharedAnswers).length > 0 && (
                       <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
                         <p className="text-xs font-bold text-blue-800 uppercase tracking-wider mb-3">Candidate Info — one edit applies to all {candidateJobs.length} jobs</p>
-                        <div className="space-y-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           {Object.entries(sharedAnswers).map(([fieldName, q]) => (
                             <div key={fieldName} className="bg-white border border-blue-100 rounded-lg p-3">
                               <p className="text-sm font-bold text-gray-700 mb-2">Q: {q.label}</p>
